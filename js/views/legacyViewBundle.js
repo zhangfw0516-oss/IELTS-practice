@@ -203,6 +203,22 @@
             }
         }
 
+        // 融合背单词时长与背单词打卡日期
+        if (typeof window !== 'undefined' && window.StudyStatsManager && typeof window.StudyStatsManager.getVocabStats === 'function') {
+            try {
+                var vocab = window.StudyStatsManager.getVocabStats();
+                totalMinutes += (Number(vocab.totalVocabSeconds) || 0);
+                if (Array.isArray(vocab.studyDates)) {
+                    vocab.studyDates.forEach(function(dKey) {
+                        if (dKey && !seenDates.has(dKey)) {
+                            seenDates.add(dKey);
+                            uniqueDates.push(dKey);
+                        }
+                    });
+                }
+            } catch (_) {}
+        }
+
         var avgScore = totalPracticed > 0 ? totalScore / totalPracticed : 0;
         var streak = calculateStreak(uniqueDates);
 

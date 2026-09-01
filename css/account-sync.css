@@ -385,3 +385,59 @@
 .account-link-btn:hover {
     color: #1d4ed8 !important;
 }
+
+/* 学习综合概览卡片 */
+.study-overview-card {
+    background: var(--card-bg, rgba(255, 255, 255, 0.75)) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-color, rgba(226, 232, 240, 0.8)) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+    padding: 22px 28px !important;
+}
+
+.study-overview-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px 36px;
+}
+
+.study-stat-item .stat-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary, #64748b);
+    margin-bottom: 8px;
+}
+
+.study-stat-item .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+    line-height: 1.1;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.study-stat-item .stat-unit {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-muted, #64748b);
+}
+
+@media (max-width: 640px) {
+    .study-overview-card {
+        padding: 18px 20px !important;
+    }
+    .study-overview-grid {
+        gap: 16px 20px;
+    }
+    .study-stat-item .stat-value {
+        font-size: 1.6rem;
+    }
+}

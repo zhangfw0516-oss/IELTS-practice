@@ -2215,6 +2215,20 @@ function computePracticeSummaryFallback(records) {
         }
     });
 
+    if (typeof window !== 'undefined' && window.StudyStatsManager && typeof window.StudyStatsManager.getVocabStats === 'function') {
+        try {
+            const vocab = window.StudyStatsManager.getVocabStats();
+            totalDuration += (Number(vocab.totalVocabSeconds) || 0);
+            if (Array.isArray(vocab.studyDates)) {
+                vocab.studyDates.forEach(dKey => {
+                    if (dKey && !dateStrings.includes(dKey)) {
+                        dateStrings.push(dKey);
+                    }
+                });
+            }
+        } catch (_) {}
+    }
+
     const uniqueDates = Array.from(new Set(dateStrings)).sort((a, b) => new Date(b) - new Date(a));
     let streak = 0;
     if (uniqueDates.length > 0) {

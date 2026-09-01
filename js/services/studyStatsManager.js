@@ -1,6 +1,6 @@
 /**
  * IELTS Atlas - Study Stats Manager (学习记录与时长综合统计管理器)
- * 融合真题练习时长与背单词时长，统计今日与累计学习词数及学习总时长。
+ * 深度融合真题练习记录（阅读/听力）与背单词时长/词汇数据，统一注入系统原生卡片。
  */
 (function(window) {
     'use strict';
@@ -24,7 +24,8 @@
             todayVocabDurationSeconds: 0,
             todayVocabWordsCount: 0,
             totalVocabDurationSeconds: 0,
-            totalVocabWordsLearnedSet: [] // 记录所有背过的唯一词汇
+            studyDates: [], // 记录背单词/打卡的日期集合
+            totalVocabWordsLearnedSet: []
         };
     }
 
@@ -64,8 +65,16 @@
             if (!seconds || seconds <= 0) return;
             this.ensureDayRollover();
             const stats = getRawStats();
+            const today = getTodayKey();
+
             stats.todayVocabDurationSeconds = (stats.todayVocabDurationSeconds || 0) + Math.round(seconds);
             stats.totalVocabDurationSeconds = (stats.totalVocabDurationSeconds || 0) + Math.round(seconds);
+
+            if (!Array.isArray(stats.studyDates)) stats.studyDates = [];
+            if (!stats.studyDates.includes(today)) {
+                stats.studyDates.push(today);
+            }
+
             saveRawStats(stats);
             this.render();
         },
@@ -77,7 +86,14 @@
             if (!word) return;
             this.ensureDayRollover();
             const stats = getRawStats();
+            const today = getTodayKey();
+
             stats.todayVocabWordsCount = (stats.todayVocabWordsCount || 0) + 1;
+
+            if (!Array.isArray(stats.studyDates)) stats.studyDates = [];
+            if (!stats.studyDates.includes(today)) {
+                stats.studyDates.push(today);
+            }
 
             if (!Array.isArray(stats.totalVocabWordsLearnedSet)) {
                 stats.totalVocabWordsLearnedSet = [];
@@ -92,86 +108,63 @@
         },
 
         /**
-         * 计算综合数据（练习做题 + 背单词）
+         * 获取累积的背单词时长（秒）
          */
-        async calculateCombinedStats() {
+        getVocabStats() {
             this.ensureDayRollover();
             const stats = getRawStats();
-            const today = getTodayKey();
 
-            let practiceTodaySeconds = 0;
-            let practiceTotalSeconds = 0;
-            let practiceStreak = 0;
-
-            // 1. 读取真题练习记录
-            try {
-                if (window.AppData && window.AppData.practice) {
-                    await window.AppData.ready;
-                    const summaries = await window.AppData.practice.list();
-                    if (Array.isArray(summaries)) {
-                        summaries.forEach(rec => {
-                            const duration = Number(rec.duration) || 0;
-                            practiceTotalSeconds += duration;
-
-                            // 检查是否为今日做题
-                            const recDate = rec.timestamp || rec.date || rec.createdAt;
-                            if (recDate) {
-                                const d = new Date(recDate);
-                                const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                                if (dKey === today) {
-                                    practiceTodaySeconds += duration;
-                                }
-                            }
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn('[StudyStats] Error reading practice summaries:', e);
-            }
-
-            // 2. 读取词库掌握词数
-            let totalWordsLearned = Array.isArray(stats.totalVocabWordsLearnedSet) ? stats.totalVocabWordsLearnedSet.length : 0;
+            let totalWords = Array.isArray(stats.totalVocabWordsLearnedSet) ? stats.totalVocabWordsLearnedSet.length : 0;
             try {
                 if (window.VocabStore && typeof window.VocabStore.getLearnedCount === 'function') {
                     const storeCount = window.VocabStore.getLearnedCount();
-                    if (storeCount > totalWordsLearned) totalWordsLearned = storeCount;
+                    if (storeCount > totalWords) totalWords = storeCount;
                 }
             } catch (_) {}
 
-            const todayTotalMinutes = Math.round(((stats.todayVocabDurationSeconds || 0) + practiceTodaySeconds) / 60);
-            const allTimeTotalMinutes = Math.round(((stats.totalVocabDurationSeconds || 0) + practiceTotalSeconds) / 60);
-
             return {
                 todayWords: stats.todayVocabWordsCount || 0,
-                totalWords: totalWordsLearned,
-                todayDurationMinutes: todayTotalMinutes,
-                totalDurationMinutes: allTimeTotalMinutes
+                totalWords: totalWords,
+                todayVocabSeconds: stats.todayVocabDurationSeconds || 0,
+                totalVocabSeconds: stats.totalVocabDurationSeconds || 0,
+                studyDates: Array.isArray(stats.studyDates) ? stats.studyDates : []
             };
         },
 
         /**
-         * 渲染统计卡片到页面
+         * 渲染统计卡片到页面原生 HeroUI 卡片网格
          */
         async render() {
             try {
-                const combined = await this.calculateCombinedStats();
+                const vocab = this.getVocabStats();
 
-                const todayWordsEl = document.getElementById('study-overview-today-words');
-                if (todayWordsEl) todayWordsEl.textContent = combined.todayWords;
+                // 1. 渲染今日背词与累计掌握词汇
+                const todayWordsEl = document.getElementById('today-vocab-words');
+                if (todayWordsEl) {
+                    todayWordsEl.textContent = vocab.todayWords;
+                }
 
-                const totalWordsEl = document.getElementById('study-overview-total-words');
-                if (totalWordsEl) totalWordsEl.textContent = combined.totalWords;
+                const totalWordsEl = document.getElementById('total-vocab-words');
+                if (totalWordsEl) {
+                    totalWordsEl.textContent = vocab.totalWords;
+                }
 
-                const todayDurationEl = document.getElementById('study-overview-today-duration');
-                if (todayDurationEl) todayDurationEl.textContent = combined.todayDurationMinutes;
+                // 2. 如果存在 AppData，抓取真实练习记录做题时长并累加背单词时长
+                if (window.AppData && window.AppData.practice) {
+                    await window.AppData.ready;
+                    const summaries = await window.AppData.practice.list();
+                    if (Array.isArray(summaries)) {
+                        let practiceTotalDuration = 0;
+                        summaries.forEach(rec => {
+                            practiceTotalDuration += (Number(rec.duration) || 0);
+                        });
 
-                const totalDurationEl = document.getElementById('study-overview-total-duration');
-                if (totalDurationEl) totalDurationEl.textContent = combined.totalDurationMinutes;
-
-                // 同时更新传统卡片里的学习时长 (包含背单词时长)
-                const studyTimeEl = document.getElementById('study-time');
-                if (studyTimeEl) {
-                    studyTimeEl.textContent = combined.totalDurationMinutes;
+                        const combinedMinutes = Math.round((practiceTotalDuration + vocab.totalVocabSeconds) / 60);
+                        const studyTimeEl = document.getElementById('study-time');
+                        if (studyTimeEl) {
+                            studyTimeEl.textContent = combinedMinutes;
+                        }
+                    }
                 }
             } catch (e) {
                 console.warn('[StudyStats] Render error:', e);

@@ -351,55 +351,10 @@
                 </div>
 
                 <div id="practice-summary-region" class="practice-summary-region">
-                    <!-- 学习综合概览卡片（融合刷题与背单词） -->
-                    <div class="study-overview-card" style="margin-bottom: 20px; padding: 22px 24px; border-radius: 18px; background: var(--bg-card, #ffffff); border: 1px solid var(--border-color, rgba(226, 232, 240, 0.8)); box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);">
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-                            <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--text-primary, #0f172a); display: flex; align-items: center; gap: 8px;">
-                                <span>概览</span>
-                            </h3>
-                        </div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 20px 24px;">
-                            <div class="study-stat-item">
-                                <div style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; font-weight: 500; color: var(--text-secondary, #64748b); margin-bottom: 8px;">
-                                    <span style="color: #f59e0b; font-size: 1.1rem; line-height: 1;">📑</span> 今日学习&复习
-                                </div>
-                                <div style="font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #0f172a); line-height: 1.2;">
-                                    <span id="study-overview-today-words">0</span> <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-muted, #64748b);">词</span>
-                                </div>
-                            </div>
-                            <div class="study-stat-item">
-                                <div style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; font-weight: 500; color: var(--text-secondary, #64748b); margin-bottom: 8px;">
-                                    <span style="color: #ef4444; font-size: 1.1rem; line-height: 1;">📈</span> 累计学习
-                                </div>
-                                <div style="font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #0f172a); line-height: 1.2;">
-                                    <span id="study-overview-total-words">0</span> <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-muted, #64748b);">词</span>
-                                </div>
-                            </div>
-                            <div class="study-stat-item">
-                                <div style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; font-weight: 500; color: var(--text-secondary, #64748b); margin-bottom: 8px;">
-                                    <span style="color: #f59e0b; font-size: 1.1rem; line-height: 1;">⏱️</span> 今日总时长
-                                </div>
-                                <div style="font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #0f172a); line-height: 1.2;">
-                                    <span id="study-overview-today-duration">0</span> <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-muted, #64748b);">分钟</span>
-                                </div>
-                            </div>
-                            <div class="study-stat-item">
-                                <div style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; font-weight: 500; color: var(--text-secondary, #64748b); margin-bottom: 8px;">
-                                    <span style="color: #ef4444; font-size: 1.1rem; line-height: 1;">🕒</span> 累计时长
-                                </div>
-                                <div style="font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #0f172a); line-height: 1.2;">
-                                    <span id="study-overview-total-duration">0</span> <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-muted, #64748b);">分钟</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="practice-stats hero-grid hero-grid--stats">
                         <div class="hero-card hero-card--stat">
                             <div class="hero-card__label">已练习题目</div>
-                            <div class="hero-card__value" id="total-practiced">
-                                0
-                            </div>
+                            <div class="hero-card__value" id="total-practiced">0</div>
                             <div class="hero-card__meta">累计巩固练习</div>
                         </div>
                         <div class="hero-card hero-card--stat">
@@ -410,12 +365,22 @@
                         <div class="hero-card hero-card--stat">
                             <div class="hero-card__label">学习时长(分钟)</div>
                             <div class="hero-card__value" id="study-time">0</div>
-                            <div class="hero-card__meta">聚焦沉浸时长</div>
+                            <div class="hero-card__meta">做题 + 背词总计</div>
                         </div>
                         <div class="hero-card hero-card--stat">
                             <div class="hero-card__label">连续学习天数</div>
                             <div class="hero-card__value" id="streak-days">0</div>
                             <div class="hero-card__meta">坚持天数</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">今日背词&复习</div>
+                            <div class="hero-card__value" id="today-vocab-words">0</div>
+                            <div class="hero-card__meta">今日学习词数</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">累计掌握词汇</div>
+                            <div class="hero-card__value" id="total-vocab-words">0</div>
+                            <div class="hero-card__meta">核心词库储备</div>
                         </div>
                     </div>
 
