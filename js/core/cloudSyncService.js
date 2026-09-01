@@ -323,12 +323,21 @@
                 const snapshot = await window.AppData.backups.export();
                 const now = Date.now();
 
+                let studyStatsRaw = null;
+                let vocabCheckpointRaw = null;
+                try {
+                    studyStatsRaw = localStorage.getItem('ielts_study_stats_v1');
+                    vocabCheckpointRaw = localStorage.getItem('ielts_vocab_session_checkpoint');
+                } catch (_) {}
+
                 const syncDoc = {
                     updatedAt: now,
                     updatedAtIso: new Date(now).toISOString(),
                     clientDevice: navigator.userAgent.slice(0, 100),
                     version: 2,
-                    snapshot: snapshot
+                    snapshot: snapshot,
+                    studyStats: studyStatsRaw,
+                    vocabCheckpoint: vocabCheckpointRaw
                 };
 
                 const userRef = state.db.collection('users').doc(state.currentUser.uid);
@@ -347,7 +356,7 @@
                 this._emitChange();
 
                 if (!options.silent && typeof window.showToast === 'function') {
-                    window.showToast('✅ 学习数据已成功同步至云端！', 'success');
+                    window.showToast('✅ 学习数据与背词进度已成功同步至云端！', 'success');
                 }
                 return true;
             } catch (err) {
@@ -392,6 +401,18 @@
 
                 state.status = 'syncing';
                 this._emitChange();
+
+                if (cloudData.studyStats) {
+                    try {
+                        localStorage.setItem('ielts_study_stats_v1', cloudData.studyStats);
+                        if (window.StudyStatsManager) window.StudyStatsManager.render();
+                    } catch (_) {}
+                }
+                if (cloudData.vocabCheckpoint) {
+                    try {
+                        localStorage.setItem('ielts_vocab_session_checkpoint', cloudData.vocabCheckpoint);
+                    } catch (_) {}
+                }
 
                 const cloudSnapshot = cloudData.snapshot;
                 if (cloudSnapshot) {

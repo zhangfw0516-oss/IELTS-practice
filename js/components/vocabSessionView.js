@@ -188,6 +188,52 @@
         setTimeout(() => URL.revokeObjectURL(url), 0);
     }
 
+    const CHECKPOINT_STORAGE_KEY = 'ielts_vocab_session_checkpoint';
+
+    function saveSessionCheckpoint() {
+        try {
+            if (state.session.stage === 'complete' || state.session.stage === 'empty') {
+                localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
+                return;
+            }
+            if (!state.session.currentWord && (!state.session.activeQueue || !state.session.activeQueue.length)) {
+                return;
+            }
+            const checkpoint = {
+                timestamp: Date.now(),
+                stage: state.session.stage,
+                currentWord: state.session.currentWord,
+                activeQueue: state.session.activeQueue,
+                backlog: state.session.backlog,
+                progress: state.session.progress,
+                dueTotal: state.session.dueTotal,
+                newTotal: state.session.newTotal
+            };
+            localStorage.setItem(CHECKPOINT_STORAGE_KEY, JSON.stringify(checkpoint));
+        } catch (e) {
+            console.warn('[Vocab] Failed to save session checkpoint:', e);
+        }
+    }
+
+    function loadSessionCheckpoint() {
+        try {
+            const raw = localStorage.getItem(CHECKPOINT_STORAGE_KEY);
+            if (raw) {
+                const cp = JSON.parse(raw);
+                if (cp && (cp.currentWord || (cp.activeQueue && cp.activeQueue.length))) {
+                    return cp;
+                }
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function clearSessionCheckpoint() {
+        try {
+            localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
+        } catch (_) {}
+    }
+
     function resetSessionState() {
         stopActivePronunciation();
         state.session.backlog = [];
@@ -279,14 +325,21 @@
                     </div>
                 </div>
             </header>
-            <div class="vocab-topbar-spacer" aria-hidden="true"></div>
-            <section class="vocab-due-banner" data-vocab-role="due-banner" hidden>
-                <div class="vocab-due-banner__container">
-                    <div class="vocab-due-banner__content">
-                        <span class="vocab-due-banner__icon" aria-hidden="true">⏰</span>
-                        <p class="vocab-due-banner__text" data-vocab-role="due-text">你有 0 个到期复习，建议先复习。</p>
-                    </div>
-                    <button class="btn btn-sm btn-outline" type="button" data-action="start-review">开始复习</button>
+            <section class="vocab-mode-strip" data-vocab-role="mode-strip" style="max-width: 960px; margin: 0 auto 16px; padding: 0 16px;">
+                <div style="display: flex; gap: 14px; align-items: stretch;">
+                    <button class="vocab-mode-pill" type="button" data-action="start-learn-mode" style="flex: 1; padding: 12px 18px; border-radius: 14px; background: var(--bg-card, rgba(255,255,255,0.7)); backdrop-filter: blur(12px); border: 1px solid var(--border-color, rgba(226,232,240,0.8)); cursor: pointer; text-align: left; transition: all 0.2s ease;">
+                        <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-primary);">Learn</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b; margin-top: 2px;" data-vocab-role="learn-count">0</div>
+                    </button>
+                    <button class="vocab-mode-pill" type="button" data-action="start-review-mode" style="flex: 1; padding: 12px 18px; border-radius: 14px; background: var(--bg-card, rgba(255,255,255,0.7)); backdrop-filter: blur(12px); border: 1px solid var(--border-color, rgba(226,232,240,0.8)); cursor: pointer; text-align: left; transition: all 0.2s ease;">
+                        <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-primary);">Review</div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b; margin-top: 2px;" data-vocab-role="review-count">0</div>
+                    </button>
+                </div>
+                <div data-vocab-role="resume-banner" hidden style="margin-top: 12px;">
+                    <button type="button" data-action="resume-checkpoint" style="width: 100%; padding: 12px 16px; border-radius: 12px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; border: none; font-weight: 600; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(37,99,235,0.25);">
+                        <span>⚡ 继续上次背词进度 (<strong data-vocab-role="resume-progress">0/24</strong>)</span>
+                    </button>
                 </div>
             </section>
             <main class="vocab-body" data-vocab-role="main">
@@ -663,6 +716,24 @@
                 }
             });
             state.elements.sidePanel.dataset.bound = 'true';
+        }
+        if (state.container && !state.container.dataset.modeBound) {
+            state.container.addEventListener('click', (event) => {
+                const trigger = event.target.closest('[data-action]');
+                const action = trigger?.dataset?.action;
+                if (action === 'start-learn-mode') {
+                    clearSessionCheckpoint();
+                    startReviewFlow({ preferNew: true });
+                }
+                if (action === 'start-review-mode') {
+                    clearSessionCheckpoint();
+                    startReviewFlow({ preferNew: false });
+                }
+                if (action === 'resume-checkpoint') {
+                    resumeSavedCheckpoint();
+                }
+            });
+            state.container.dataset.modeBound = 'true';
         }
         if (!state.keyboardHandler) {
             state.keyboardHandler = (event) => {
@@ -1855,6 +1926,17 @@
                 state.session.progress.completed + 1
             );
             state.session.progress.correct += 1;
+            
+            // 实时记录到全局学习统计，确保立即在统计卡片上反映
+            if (window.StudyStatsManager) {
+                try {
+                    window.StudyStatsManager.recordWordStudied(word.word);
+                    window.StudyStatsManager.addVocabStudyDuration(15);
+                    window.StudyStatsManager.render();
+                } catch (_) {}
+            }
+            saveSessionCheckpoint();
+
             showFeedbackMessage(`“${word.word}”已标为熟词，并移出背词队列`, 'success');
             announce(`${word.word} 已标为熟词`);
             moveToNextWord();
@@ -2579,6 +2661,29 @@
         syncSidePanelVisibility();
     }
 
+    function updateModeCounts() {
+        if (!state.store) return;
+        const stats = computeStats();
+        const newTotal = stats?.newCandidateCount || 0;
+        const dueTotal = stats?.dueCount || 0;
+
+        const learnEl = state.container?.querySelector('[data-vocab-role="learn-count"]');
+        if (learnEl) learnEl.textContent = newTotal;
+
+        const reviewEl = state.container?.querySelector('[data-vocab-role="review-count"]');
+        if (reviewEl) reviewEl.textContent = dueTotal;
+    }
+
+    function resumeSavedCheckpoint() {
+        const checkpoint = loadSessionCheckpoint();
+        if (checkpoint && checkpoint.currentWord) {
+            Object.assign(state.session, checkpoint);
+            const resumeBanner = state.container?.querySelector('[data-vocab-role="resume-banner"]');
+            if (resumeBanner) resumeBanner.setAttribute('hidden', 'hidden');
+            render();
+        }
+    }
+
     async function mount(container) {
         const target = resolveContainer(container || '#vocab-view');
         if (!target) {
@@ -2615,6 +2720,26 @@
             return;
         }
         ensureListSwitcher();
+        updateModeCounts();
+
+        const checkpoint = loadSessionCheckpoint();
+        const resumeBanner = state.container?.querySelector('[data-vocab-role="resume-banner"]');
+        const resumeProgress = state.container?.querySelector('[data-vocab-role="resume-progress"]');
+
+        if (checkpoint && checkpoint.currentWord) {
+            if (resumeBanner) {
+                resumeBanner.removeAttribute('hidden');
+                if (resumeProgress && checkpoint.progress) {
+                    resumeProgress.textContent = `${checkpoint.progress.completed}/${checkpoint.progress.total}`;
+                }
+            }
+            Object.assign(state.session, checkpoint);
+            render();
+            return;
+        } else {
+            if (resumeBanner) resumeBanner.setAttribute('hidden', 'hidden');
+        }
+
         prepareSessionQueue();
         showDueBanner(state.session.duePending);
         if (state.session.stage === 'empty') {
