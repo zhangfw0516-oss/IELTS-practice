@@ -1602,8 +1602,14 @@ body.vocab-focus-active #vocab-view.view {
     opacity: 0.65;
 }
 
-.vocab-card__pronounce {
+.vocab-card__pronunciation {
     align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vocab-card__pronounce {
     display: inline-flex;
     align-items: center;
     gap: 7px;
@@ -1620,12 +1626,20 @@ body.vocab-focus-active #vocab-view.view {
     transition: background 0.2s ease, transform 0.2s ease;
 }
 
-.vocab-card__pronounce:hover {
+.vocab-card__pronounce:hover:not(:disabled) {
     background: rgba(196, 104, 75, 0.1);
     transform: translateY(-1px);
 }
 
-.vocab-card__pronounce span {
+.vocab-card__pronounce:disabled {
+    cursor: wait;
+}
+
+.vocab-card__pronounce.is-playing {
+    background: rgba(196, 104, 75, 0.12);
+}
+
+.vocab-card__pronounce-icon {
     display: grid;
     place-items: center;
     width: 24px;
@@ -1633,6 +1647,15 @@ body.vocab-focus-active #vocab-view.view {
     border-radius: 50%;
     background: var(--vocab-accent);
     color: #fff;
+}
+
+.vocab-card__pronounce.is-loading .vocab-card__pronounce-icon {
+    animation: vocab-pronounce-pulse 0.85s ease-in-out infinite alternate;
+}
+
+@keyframes vocab-pronounce-pulse {
+    from { transform: scale(0.9); opacity: 0.65; }
+    to { transform: scale(1); opacity: 1; }
 }
 
 .vocab-card__pronounce svg {

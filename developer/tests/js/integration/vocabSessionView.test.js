@@ -45,6 +45,8 @@ function patchVocabSessionView(source) {
         moveToNextWord,
         revealMeaning,
         markCurrentWordFamiliar,
+        buildBritishPronunciationUrl,
+        playCurrentPronunciation,
         submitSpelling,
         applyResult,
         handleCardAction,
@@ -1062,10 +1064,73 @@ async function run() {
         assert.ok(markup.includes('不认识'));
         assert.ok(markup.includes('data-action="mark-familiar"'));
         assert.ok(markup.includes('标为熟词'));
-        assert.ok(markup.includes('Cambridge 真人英音'));
+        assert.ok(markup.includes('data-action="play-pronunciation"'));
+        assert.ok(markup.includes('真人英音'));
+        assert.ok(markup.includes('去 Cambridge 听'));
+        assert.ok(markup.includes('data-pronunciation-fallback hidden'));
         assert.ok(markup.includes('https://dictionary.cambridge.org/search/english/direct/?q=emperor'));
         assert.ok(markup.includes('target="_blank"'));
         assert.ok(markup.includes('rel="noopener noreferrer"'));
+    });
+
+    await record('pronunciation plays British human audio in place', async () => {
+        const played = [];
+        class AudioStub {
+            constructor(src) {
+                this.src = src;
+                this.listeners = {};
+            }
+            play() {
+                played.push(this.src);
+                return Promise.resolve();
+            }
+            pause() {}
+            addEventListener(type, handler) {
+                this.listeners[type] = handler;
+            }
+        }
+        windowStub.Audio = AudioStub;
+        hooks.state.session.currentWord = { id: 'audio-1', word: 'emperor' };
+        const label = createElementStub('span');
+        const trigger = createElementStub('button', {
+            __queryMap: { '.vocab-card__pronounce-label': label }
+        });
+
+        const result = await hooks.playCurrentPronunciation(trigger);
+
+        assert.strictEqual(result, true);
+        assert.deepStrictEqual(played, [
+            'https://ssl.gstatic.com/dictionary/static/sounds/oxford/emperor--_gb_1.mp3'
+        ]);
+        assert.strictEqual(label.textContent, '正在播放');
+        assert.ok(trigger.classList.contains('is-playing'));
+        assert.strictEqual(trigger.getAttribute('aria-busy'), 'false');
+    });
+
+    await record('missing direct audio reveals the Cambridge fallback', async () => {
+        class MissingAudioStub {
+            play() {
+                return Promise.reject(new Error('missing'));
+            }
+            pause() {}
+            addEventListener() {}
+        }
+        windowStub.Audio = MissingAudioStub;
+        hooks.state.session.currentWord = { id: 'audio-2', word: 'roll-film' };
+        const label = createElementStub('span');
+        const trigger = createElementStub('button', {
+            __queryMap: { '.vocab-card__pronounce-label': label }
+        });
+        const fallback = createElementStub('a');
+        fallback.hidden = true;
+        elements.sessionCard.__queryMap['[data-pronunciation-fallback]'] = fallback;
+
+        const result = await hooks.playCurrentPronunciation(trigger);
+
+        assert.strictEqual(result, false);
+        assert.strictEqual(trigger.hidden, true);
+        assert.strictEqual(fallback.hidden, false);
+        assert.ok(windowStub.messages.some((message) => message.text.includes('可到 Cambridge 收听')));
     });
 
     await record('mark familiar persists the status and removes the word from study', async () => {

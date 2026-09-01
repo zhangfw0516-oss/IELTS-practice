@@ -2727,6 +2727,9 @@
         outsideClickHandler: null
     };
 
+    let activePronunciationAudio = null;
+    let pronunciationEpoch = 0;
+
     function resolveContainer(target) {
         if (!target) {
             return null;
@@ -2835,6 +2838,7 @@
     }
 
     function resetSessionState() {
+        stopActivePronunciation();
         state.session.backlog = [];
         state.session.activeQueue = [];
         state.session.completed = [];
@@ -4285,6 +4289,10 @@
             revealMeaning();
             return;
         }
+        if (action === 'play-pronunciation') {
+            playCurrentPronunciation(trigger);
+            return;
+        }
         if (action === 'mark-familiar') {
             markCurrentWordFamiliar(trigger);
             return;
@@ -4366,6 +4374,104 @@
         state.session.meaningVisible = !state.session.meaningVisible;
         state.ui.sidePanelManual = null;
         render();
+    }
+
+    function buildBritishPronunciationUrl(value) {
+        const normalized = String(value || '')
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .toLowerCase();
+        if (!normalized || !/^[a-z0-9-]+$/.test(normalized)) {
+            return '';
+        }
+        return `https://ssl.gstatic.com/dictionary/static/sounds/oxford/${encodeURIComponent(normalized)}--_gb_1.mp3`;
+    }
+
+    function setPronunciationControlState(trigger, status) {
+        if (!trigger) {
+            return;
+        }
+        const label = trigger.querySelector('.vocab-card__pronounce-label');
+        const labels = {
+            idle: '真人英音',
+            loading: '正在加载…',
+            playing: '正在播放'
+        };
+        trigger.disabled = status === 'loading';
+        trigger.classList.toggle('is-loading', status === 'loading');
+        trigger.classList.toggle('is-playing', status === 'playing');
+        trigger.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+        if (label) {
+            label.textContent = labels[status] || labels.idle;
+        }
+    }
+
+    function stopActivePronunciation() {
+        pronunciationEpoch += 1;
+        if (!activePronunciationAudio) {
+            return;
+        }
+        try {
+            activePronunciationAudio.pause();
+            activePronunciationAudio.currentTime = 0;
+        } catch (_) {}
+        activePronunciationAudio = null;
+    }
+
+    function showPronunciationFallback(trigger, word) {
+        if (trigger) {
+            trigger.hidden = true;
+            setPronunciationControlState(trigger, 'idle');
+        }
+        const fallback = state.elements.sessionCard?.querySelector('[data-pronunciation-fallback]');
+        if (fallback) {
+            fallback.hidden = false;
+            fallback.removeAttribute('hidden');
+        }
+        showFeedbackMessage(`暂未收录“${word}”的真人英音，可到 Cambridge 收听`, 'info');
+        announce(`${word} 暂无可直接播放的真人英音`);
+    }
+
+    async function playCurrentPronunciation(trigger) {
+        const word = String(state.session.currentWord?.word || '').trim();
+        const audioUrl = buildBritishPronunciationUrl(word);
+        const AudioCtor = window.Audio;
+        if (!word || !audioUrl || typeof AudioCtor !== 'function') {
+            showPronunciationFallback(trigger, word || '这个单词');
+            return false;
+        }
+
+        stopActivePronunciation();
+        const requestEpoch = pronunciationEpoch;
+        setPronunciationControlState(trigger, 'loading');
+        const audio = new AudioCtor(audioUrl);
+        audio.preload = 'auto';
+        activePronunciationAudio = audio;
+
+        try {
+            await audio.play();
+            if (requestEpoch !== pronunciationEpoch) {
+                return false;
+            }
+            setPronunciationControlState(trigger, 'playing');
+            announce(`正在播放 ${word} 的真人英音`);
+            audio.addEventListener('ended', () => {
+                if (requestEpoch !== pronunciationEpoch) {
+                    return;
+                }
+                activePronunciationAudio = null;
+                setPronunciationControlState(trigger, 'idle');
+            }, { once: true });
+            return true;
+        } catch (_) {
+            if (requestEpoch !== pronunciationEpoch) {
+                return false;
+            }
+            activePronunciationAudio = null;
+            showPronunciationFallback(trigger, word);
+            return false;
+        }
     }
 
     async function markCurrentWordFamiliar(trigger) {
@@ -4725,6 +4831,7 @@
     }
 
     function moveToNextWord() {
+        stopActivePronunciation();
         state.session.lastAnswer = null;
         if (!state.session.activeQueue.length) {
             state.session.meaningVisible = false;
@@ -4819,6 +4926,10 @@
         }
         const session = state.session;
         const word = session.currentWord;
+
+        if (session.stage !== 'recognition') {
+            stopActivePronunciation();
+        }
 
         if (session.stage === 'loading' || session.stage === 'preparing') {
             card.innerHTML = `
@@ -4920,9 +5031,16 @@
                         <div class="vocab-card__word">${safeWord}</div>
                         ${phoneticBlock}
                     </div>
-                    <a class="vocab-card__pronounce" href="${cambridgeUrl}" target="_blank" rel="noopener noreferrer" aria-label="在 Cambridge Dictionary 打开 ${safeWord} 的真人英式发音">
-                        <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span> Cambridge 真人英音
-                    </a>
+                    <div class="vocab-card__pronunciation">
+                        <button class="vocab-card__pronounce" type="button" data-action="play-pronunciation" aria-label="直接播放 ${safeWord} 的真人英式发音" aria-busy="false">
+                            <span class="vocab-card__pronounce-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span>
+                            <span class="vocab-card__pronounce-label">真人英音</span>
+                        </button>
+                        <a class="vocab-card__pronounce vocab-card__pronounce--fallback" href="${cambridgeUrl}" target="_blank" rel="noopener noreferrer" data-pronunciation-fallback hidden aria-label="在 Cambridge Dictionary 打开 ${safeWord} 的真人英式发音">
+                            <span class="vocab-card__pronounce-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span>
+                            <span class="vocab-card__pronounce-label">去 Cambridge 听</span>
+                        </a>
+                    </div>
                     ${meaningBlock}
                     ${revealControl}
                     <p class="vocab-card__instruction">${session.meaningVisible ? '对照释义后，选择最真实的记忆状态' : '先凭记忆判断；拿不准可以查看释义'}</p>
