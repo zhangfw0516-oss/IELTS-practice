@@ -1612,6 +1612,7 @@ body.vocab-focus-active #vocab-view.view {
     border-radius: 999px;
     background: transparent;
     color: var(--vocab-accent-strong);
+    text-decoration: none;
     font: inherit;
     font-size: 13px;
     font-weight: 700;

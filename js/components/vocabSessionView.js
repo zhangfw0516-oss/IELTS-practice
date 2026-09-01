@@ -1636,10 +1636,6 @@
             revealMeaning();
             return;
         }
-        if (action === 'speak-word') {
-            speakCurrentWord();
-            return;
-        }
         if (action === 'mark-familiar') {
             markCurrentWordFamiliar(trigger);
             return;
@@ -1765,28 +1761,6 @@
             }
             return false;
         }
-    }
-
-    function speakCurrentWord() {
-        const text = String(state.session.currentWord?.word || '').trim();
-        const speech = window.speechSynthesis;
-        const Utterance = window.SpeechSynthesisUtterance;
-        if (!text || !speech || typeof Utterance !== 'function') {
-            announce('当前浏览器暂不支持单词发音');
-            showFeedbackMessage('当前浏览器暂不支持单词发音', 'info');
-            return;
-        }
-        speech.cancel();
-        const utterance = new Utterance(text);
-        utterance.lang = 'en-GB';
-        utterance.rate = 0.82;
-        const voices = typeof speech.getVoices === 'function' ? speech.getVoices() : [];
-        const preferredVoice = voices.find((voice) => /^en-GB/i.test(voice.lang));
-        if (preferredVoice) {
-            utterance.voice = preferredVoice;
-        }
-        speech.speak(utterance);
-        announce(`正在播放 ${text} 的发音`);
     }
 
     function levenshteinDistance(a, b) {
@@ -2266,6 +2240,7 @@
             const safeWord = escapeHtml(word.word);
             const safeMeaning = escapeHtml(word.meaning || '暂无释义');
             const safeExample = escapeHtml(word.example || '');
+            const cambridgeUrl = escapeHtml(`https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(word.word || '')}`);
             const phonetic = normalizePhoneticValue(word.phonetic);
             const phoneticBlock = phonetic
                 ? `<div class="vocab-card__phonetic"><span class="visually-hidden">音标：</span><span aria-hidden="true">/</span><span>${escapeHtml(phonetic)}</span><span aria-hidden="true">/</span></div>`
@@ -2296,9 +2271,9 @@
                         <div class="vocab-card__word">${safeWord}</div>
                         ${phoneticBlock}
                     </div>
-                    <button class="vocab-card__pronounce" type="button" data-action="speak-word" aria-label="播放 ${safeWord} 的英式发音">
-                        <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span> 英式发音
-                    </button>
+                    <a class="vocab-card__pronounce" href="${cambridgeUrl}" target="_blank" rel="noopener noreferrer" aria-label="在 Cambridge Dictionary 打开 ${safeWord} 的真人英式发音">
+                        <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span> Cambridge 真人英音
+                    </a>
                     ${meaningBlock}
                     ${revealControl}
                     <p class="vocab-card__instruction">${session.meaningVisible ? '对照释义后，选择最真实的记忆状态' : '先凭记忆判断；拿不准可以查看释义'}</p>

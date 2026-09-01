@@ -45,7 +45,6 @@ function patchVocabSessionView(source) {
         moveToNextWord,
         revealMeaning,
         markCurrentWordFamiliar,
-        speakCurrentWord,
         submitSpelling,
         applyResult,
         handleCardAction,
@@ -1026,7 +1025,6 @@ async function run() {
         );
         assert.ok(recognitionMarkup.includes('<span class="visually-hidden">音标：</span>'));
         assert.ok(recognitionMarkup.includes('<span>ˈæl.fə</span>'));
-        assert.ok(!recognitionMarkup.includes('//'));
         assert.strictEqual((recognitionMarkup.match(/aria-hidden="true">\/<\/span>/g) || []).length, 2);
         const wordlineRule = readSource('css/main.css').match(/\.vocab-card__wordline\s*\{([^}]*)\}/);
         assert.ok(wordlineRule, 'Missing word-and-phonetic layout rule');
@@ -1064,7 +1062,10 @@ async function run() {
         assert.ok(markup.includes('不认识'));
         assert.ok(markup.includes('data-action="mark-familiar"'));
         assert.ok(markup.includes('标为熟词'));
-        assert.ok(markup.includes('英式发音'));
+        assert.ok(markup.includes('Cambridge 真人英音'));
+        assert.ok(markup.includes('https://dictionary.cambridge.org/search/english/direct/?q=emperor'));
+        assert.ok(markup.includes('target="_blank"'));
+        assert.ok(markup.includes('rel="noopener noreferrer"'));
     });
 
     await record('mark familiar persists the status and removes the word from study', async () => {
@@ -1088,32 +1089,6 @@ async function run() {
         assert.strictEqual(store.getNewWords(10).length, 0);
         assert.strictEqual(hooks.state.session.activeQueue.length, 0);
         assert.strictEqual(hooks.state.session.stage, 'complete');
-    });
-
-    await record('pronunciation uses an English voice when browser speech is available', () => {
-        let spoken = null;
-        class UtteranceStub {
-            constructor(text) {
-                this.text = text;
-            }
-        }
-        const englishVoice = { lang: 'en-GB', name: 'English' };
-        windowStub.SpeechSynthesisUtterance = UtteranceStub;
-        windowStub.speechSynthesis = {
-            cancel() {},
-            getVoices: () => [englishVoice],
-            speak(utterance) {
-                spoken = utterance;
-            }
-        };
-        hooks.state.session.currentWord = { id: 'speak-1', word: 'emperor' };
-
-        hooks.speakCurrentWord();
-
-        assert.strictEqual(spoken.text, 'emperor');
-        assert.strictEqual(spoken.lang, 'en-GB');
-        assert.strictEqual(spoken.rate, 0.82);
-        assert.strictEqual(spoken.voice, englishVoice);
     });
 
     await record('feedback renders phonetic as a labeled detail', () => {
@@ -1168,7 +1143,6 @@ async function run() {
             hooks.renderCard();
 
             assert.ok(!elements.sessionCard.innerHTML.includes('vocab-card__phonetic'));
-            assert.ok(!elements.sessionCard.innerHTML.includes('//'));
 
             hooks.state.session.lastAnswer = {
                 recognitionQuality: 'good',
@@ -1183,7 +1157,6 @@ async function run() {
 
             assert.ok(!elements.sessionCard.innerHTML.includes('vocab-feedback__phonetic'));
             assert.ok(!elements.sessionCard.innerHTML.includes('<dt>音标</dt>'));
-            assert.ok(!elements.sessionCard.innerHTML.includes('//'));
         });
     });
 
