@@ -1990,6 +1990,14 @@
             return;
         }
         const now = new Date();
+
+        // 记录背单词学习时间与词汇量
+        if (window.StudyStatsManager && word && word.word) {
+            try {
+                window.StudyStatsManager.recordWordStudied(word.word);
+                window.StudyStatsManager.addVocabStudyDuration(15);
+            } catch (_) {}
+        }
         
         // 基础质量评分（来自认识判断）
         const recognitionQuality = session.recognitionQuality || 'good';
