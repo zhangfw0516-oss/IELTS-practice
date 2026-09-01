@@ -1,11 +1,11 @@
 /**
  * IELTS Atlas - Account & Cloud Sync Modal Component
- * 负责渲染多端账号登录/注册/同步控制面板，以及顶部状态徽标组件。
+ * 纯粹极简的用户名 + 密码登录与多端数据同步面板。
  */
 (function(window) {
     'use strict';
 
-    let currentTab = 'login'; // 'login' | 'register' | 'config'
+    let currentMode = 'login'; // 'login' | 'register'
     let overlayEl = null;
     let badgeEl = null;
 
@@ -48,7 +48,7 @@
             badgeEl.setAttribute('aria-label', '多端账号与云同步');
             badgeEl.innerHTML = `
                 <span class="account-status-dot"></span>
-                <span class="account-badge-text">☁️ 云同步</span>
+                <span class="account-badge-text">☁️ 登录 / 同步</span>
             `;
 
             badgeEl.addEventListener('click', () => {
@@ -69,27 +69,22 @@
 
             dot.className = 'account-status-dot';
 
-            if (!state.isConfigured) {
-                text.textContent = '☁️ 配置云同步';
-                return;
-            }
-
             if (!state.currentUser) {
-                text.textContent = '👤 登录同步';
+                text.textContent = '☁️ 登录 / 同步';
                 return;
             }
 
-            // 已登录状态
-            const shortEmail = state.currentUser.email.split('@')[0];
+            // 已登录状态：优先显示纯用户名
+            const username = state.currentUser.username || state.currentUser.displayName || '已登录';
             if (state.status === 'syncing') {
                 dot.classList.add('status-syncing');
-                text.textContent = '🔄 正在同步...';
+                text.textContent = `🔄 同步中... · ${username}`;
             } else if (state.status === 'error') {
                 dot.classList.add('status-error');
-                text.textContent = `⚠️ 同步异常 · ${shortEmail}`;
+                text.textContent = `⚠️ 同步异常 · ${username}`;
             } else {
                 dot.classList.add('status-synced');
-                text.textContent = `🟢 ${shortEmail}`;
+                text.textContent = `🟢 ${username}`;
             }
         },
 
@@ -103,7 +98,7 @@
                 <div class="account-modal-card">
                     <div class="account-modal-header">
                         <h3 class="account-modal-title">
-                            <span>☁️</span> 多端账号与数据同步
+                            <span>🔑</span> <span id="account-modal-header-text">多端同步账号</span>
                         </h3>
                         <button class="account-modal-close" aria-label="关闭">&times;</button>
                     </div>
@@ -134,7 +129,7 @@
 
         open() {
             if (!overlayEl) this.createModal();
-            const serviceState = window.CloudSyncService ? window.CloudSyncService.getState() : { isConfigured: false, currentUser: null };
+            const serviceState = window.CloudSyncService ? window.CloudSyncService.getState() : { currentUser: null };
             this.renderModalBody(serviceState);
             overlayEl.classList.add('active');
         },
@@ -151,27 +146,23 @@
 
         renderModalBody(state) {
             const body = document.getElementById('account-modal-body-content');
+            const headerText = document.getElementById('account-modal-header-text');
             if (!body) return;
 
             if (state.currentUser) {
+                if (headerText) headerText.textContent = '我的云端账号';
                 this.renderProfileView(body, state);
                 return;
             }
 
-            this.renderAuthTabs(body, state);
+            if (headerText) headerText.textContent = currentMode === 'register' ? '免费注册账号' : '用户登录';
+            this.renderAuthForm(body, state);
         },
 
-        renderAuthTabs(container, state) {
-            if (currentTab !== 'login' && currentTab !== 'register') {
-                currentTab = 'login';
-            }
+        renderAuthForm(container, state) {
+            const isRegister = currentMode === 'register';
 
             container.innerHTML = `
-                <div class="account-tabs">
-                    <button class="account-tab-btn ${currentTab === 'login' ? 'active' : ''}" data-tab="login">邮箱登录</button>
-                    <button class="account-tab-btn ${currentTab === 'register' ? 'active' : ''}" data-tab="register">免费注册</button>
-                </div>
-
                 ${state.errorMessage ? `
                     <div class="account-alert alert-error">
                         <span>⚠️</span>
@@ -179,100 +170,78 @@
                     </div>
                 ` : ''}
 
-                <div id="account-tab-content"></div>
+                <form id="account-auth-form">
+                    <div class="account-form-group">
+                        <label class="account-form-label" for="auth-username">
+                            ${isRegister ? '设置用户名' : '用户名'}
+                        </label>
+                        <input class="account-form-input" type="text" id="auth-username" placeholder="${isRegister ? '输入好记的用户名或昵称' : '请输入你的用户名'}" required autocomplete="username" />
+                    </div>
+                    <div class="account-form-group">
+                        <label class="account-form-label" for="auth-password">
+                            ${isRegister ? '设置密码' : '密码'}
+                        </label>
+                        <input class="account-form-input" type="password" id="auth-password" placeholder="${isRegister ? '设置密码' : '请输入密码'}" required autocomplete="${isRegister ? 'new-password' : 'current-password'}" />
+                    </div>
+                    <button type="submit" class="account-btn account-btn-primary" style="padding: 12px; font-size: 1rem; margin-top: 4px;" ${state.status === 'syncing' ? 'disabled' : ''}>
+                        ${state.status === 'syncing' ? '🔄 正在处理中...' : (isRegister ? '注 册 并 开 启 同 步' : '登 录')}
+                    </button>
+                </form>
+
+                <div style="text-align: center; margin-top: 16px;">
+                    ${isRegister ? `
+                        <button type="button" class="account-link-btn" id="btn-toggle-auth-mode" style="background: none; border: none; color: #2563eb; cursor: pointer; font-size: 0.88rem; text-decoration: underline;">
+                            已有账号？点击直接登录
+                        </button>
+                    ` : `
+                        <button type="button" class="account-link-btn" id="btn-toggle-auth-mode" style="background: none; border: none; color: #2563eb; cursor: pointer; font-size: 0.88rem; text-decoration: underline;">
+                            还没有账号？点击免费注册
+                        </button>
+                    `}
+                </div>
+
+                <div class="account-help-note" style="margin-top: 16px;">
+                    💡 登录后，背单词掌握度、错题本与做题记录将在电脑与手机端自动互通漫游。
+                </div>
             `;
 
-            container.querySelectorAll('.account-tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    currentTab = btn.getAttribute('data-tab');
+            const form = container.querySelector('#account-auth-form');
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = form.querySelector('#auth-username').value;
+                const pwd = form.querySelector('#auth-password').value;
+
+                try {
+                    if (isRegister) {
+                        await window.CloudSyncService.register(username, pwd);
+                    } else {
+                        await window.CloudSyncService.login(username, pwd);
+                    }
+                } catch (err) {
+                    console.warn('[AccountModal] Auth failed:', err);
+                }
+            });
+
+            const toggleBtn = container.querySelector('#btn-toggle-auth-mode');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    currentMode = isRegister ? 'login' : 'register';
                     this.renderModalBody(state);
                 });
-            });
-
-            const contentEl = container.querySelector('#account-tab-content');
-            if (currentTab === 'login') {
-                this.renderLoginForm(contentEl, state);
-            } else if (currentTab === 'register') {
-                this.renderRegisterForm(contentEl, state);
             }
-        },
-
-        renderLoginForm(container, state) {
-            container.innerHTML = `
-                <form id="account-login-form">
-                    <div class="account-form-group">
-                        <label class="account-form-label" for="login-email">注册邮箱</label>
-                        <input class="account-form-input" type="email" id="login-email" placeholder="name@example.com" required autocomplete="email" />
-                    </div>
-                    <div class="account-form-group">
-                        <label class="account-form-label" for="login-password">账号密码</label>
-                        <input class="account-form-input" type="password" id="login-password" placeholder="请输入密码" required autocomplete="current-password" />
-                    </div>
-                    <button type="submit" class="account-btn account-btn-primary" ${state.status === 'syncing' ? 'disabled' : ''}>
-                        ${state.status === 'syncing' ? '正在登录并同步...' : '登录并同步云端数据'}
-                    </button>
-                </form>
-                <div class="account-help-note" style="margin-top: 16px;">
-                    💡 登录后，背单词掌握度、生词本及做题记录将在电脑与手机端自动实时同步。
-                </div>
-            `;
-
-            const form = container.querySelector('#account-login-form');
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const email = form.querySelector('#login-email').value;
-                const pwd = form.querySelector('#login-password').value;
-                try {
-                    await window.CloudSyncService.login(email, pwd);
-                } catch (err) {
-                    console.warn('[AccountModal] Login failed:', err);
-                }
-            });
-        },
-
-        renderRegisterForm(container, state) {
-            container.innerHTML = `
-                <form id="account-register-form">
-                    <div class="account-form-group">
-                        <label class="account-form-label" for="reg-email">注册邮箱</label>
-                        <input class="account-form-input" type="email" id="reg-email" placeholder="name@example.com" required autocomplete="email" />
-                    </div>
-                    <div class="account-form-group">
-                        <label class="account-form-label" for="reg-password">设置密码 (至少 6 位)</label>
-                        <input class="account-form-input" type="password" id="reg-password" placeholder="设置你的登录密码" minlength="6" required autocomplete="new-password" />
-                    </div>
-                    <button type="submit" class="account-btn account-btn-primary" ${state.status === 'syncing' ? 'disabled' : ''}>
-                        ${state.status === 'syncing' ? '正在注册账号...' : '立即注册并开启云同步'}
-                    </button>
-                </form>
-                <div class="account-help-note" style="margin-top: 16px;">
-                    ✨ 注册成功后，当前浏览器里的做题记录和词汇进度将作为第一份云端存档安全保存。
-                </div>
-            `;
-
-            const form = container.querySelector('#account-register-form');
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const email = form.querySelector('#reg-email').value;
-                const pwd = form.querySelector('#reg-password').value;
-                try {
-                    await window.CloudSyncService.register(email, pwd);
-                } catch (err) {
-                    console.warn('[AccountModal] Register failed:', err);
-                }
-            });
         },
 
         renderProfileView(container, state) {
             const user = state.currentUser;
-            const initial = user.email ? user.email.charAt(0).toUpperCase() : 'U';
+            const username = user.username || user.displayName || '用户';
+            const initial = username.charAt(0).toUpperCase();
 
             container.innerHTML = `
                 <div class="account-profile-card">
                     <div class="account-user-banner">
                         <div class="account-avatar-circle">${initial}</div>
                         <div class="account-user-meta">
-                            <div class="account-user-email" title="${user.email}">${user.email}</div>
+                            <div class="account-user-email" title="${username}">${username}</div>
                             <div class="account-sync-subtext">
                                 <span>上次云端同步：</span>
                                 <strong>${formatTimeAgo(state.lastSyncTime)}</strong>
@@ -341,8 +310,7 @@
             container.querySelector('#btn-account-logout').addEventListener('click', async () => {
                 await window.CloudSyncService.logout();
             });
-        },
-
+        }
     };
 
     window.AccountModal = AccountModal;

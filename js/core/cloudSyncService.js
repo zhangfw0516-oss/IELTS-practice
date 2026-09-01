@@ -30,16 +30,47 @@
         if (!error) return '未知错误';
         const code = error.code || '';
         const msg = error.message || String(error);
-        if (code === 'auth/invalid-email') return '请输入有效的邮箱地址';
+        if (code === 'auth/invalid-email') return '请输入有效的用户名';
         if (code === 'auth/user-disabled') return '该账号已被禁用';
-        if (code === 'auth/user-not-found') return '该邮箱未注册，请先注册';
-        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') return '密码错误，请重试';
-        if (code === 'auth/email-already-in-use') return '该邮箱已被注册，请直接登录';
-        if (code === 'auth/weak-password') return '密码强度太低，建议至少 6 位字符';
+        if (code === 'auth/user-not-found') return '该用户名尚未注册，请先注册';
+        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') return '密码错误，请检查后重试';
+        if (code === 'auth/email-already-in-use') return '该用户名已被注册，请直接登录';
+        if (code === 'auth/weak-password') return '密码格式有误，请重试';
         if (code === 'auth/network-request-failed') return '网络连接失败，请检查网络后重试';
-        if (code === 'auth/too-many-requests') return '尝试次数过多，请稍后再试或重置密码';
+        if (code === 'auth/too-many-requests') return '尝试次数过多，请稍后再试';
         if (code === 'permission-denied') return '云端数据库读写权限受限，请检查 Firebase 规则';
         return msg;
+    }
+
+    function normalizeUsernameToEmail(input) {
+        const trimmed = String(input || '').trim().toLowerCase();
+        if (!trimmed) return '';
+        if (trimmed.includes('@')) return trimmed;
+        // 将普通用户名安全编码为 Firebase Auth 内部邮箱
+        const safeUser = encodeURIComponent(trimmed).replace(/%/g, '_');
+        return `${safeUser}@ielts.atlas`;
+    }
+
+    function normalizePassword(pwd) {
+        const str = String(pwd || '');
+        // Firebase 内部要求至少 6 位，对小于 6 位的密码自动加盐补齐，用户体验上实现密码长度零限制
+        if (str.length < 6) {
+            return `ielts_atlas_p_${str}_padded`;
+        }
+        return str;
+    }
+
+    function getDisplayUsername(email) {
+        if (!email) return '用户';
+        if (email.endsWith('@ielts.atlas')) {
+            const raw = email.replace('@ielts.atlas', '');
+            try {
+                return decodeURIComponent(raw.replace(/_/g, '%'));
+            } catch (_) {
+                return raw;
+            }
+        }
+        return email.split('@')[0];
     }
 
     const CloudSyncService = {
@@ -92,15 +123,17 @@
                 // 监听登录状态改变
                 if (state.unsubscribeAuth) state.unsubscribeAuth();
                 state.unsubscribeAuth = state.auth.onAuthStateChanged(async (user) => {
+                    const displayUser = user ? getDisplayUsername(user.email) : '';
                     state.currentUser = user ? {
                         uid: user.uid,
                         email: user.email,
-                        displayName: user.displayName || user.email.split('@')[0],
+                        username: displayUser,
+                        displayName: displayUser,
                         emailVerified: user.emailVerified
                     } : null;
 
                     if (user) {
-                        console.info('[CloudSync] Logged in as:', user.email);
+                        console.info('[CloudSync] Logged in as:', displayUser);
                         // 登录后自动执行一次智能拉取合并
                         await this.pullFromCloud({ silent: true }).catch(err => {
                             console.warn('[CloudSync] Initial pull failed:', err);
@@ -180,16 +213,23 @@
         },
 
         /**
-         * 用户注册 (Email + Password)
+         * 用户注册 (用户名 + 密码，无长度或格式限制)
          */
-        async register(email, password) {
-            if (!state.auth) throw new Error('云服务未初始化或未配置 Firebase');
+        async register(username, password) {
+            if (!state.auth) throw new Error('云服务未初始化');
+            const trimmedUser = String(username || '').trim();
+            if (!trimmedUser) throw new Error('请输入用户名');
+            const trimmedPwd = String(password || '');
+            if (!trimmedPwd) throw new Error('请输入密码');
+
             state.status = 'syncing';
             state.errorMessage = null;
             this._emitChange();
 
             try {
-                const cred = await state.auth.createUserWithEmailAndPassword(email.trim(), password);
+                const internalEmail = normalizeUsernameToEmail(trimmedUser);
+                const internalPwd = normalizePassword(trimmedPwd);
+                const cred = await state.auth.createUserWithEmailAndPassword(internalEmail, internalPwd);
                 state.status = 'synced';
                 this._emitChange();
                 // 注册成功后将当前本地数据作为首份云端备份上传
@@ -204,16 +244,23 @@
         },
 
         /**
-         * 用户登录 (Email + Password)
+         * 用户登录 (用户名 + 密码)
          */
-        async login(email, password) {
-            if (!state.auth) throw new Error('云服务未初始化或未配置 Firebase');
+        async login(username, password) {
+            if (!state.auth) throw new Error('云服务未初始化');
+            const trimmedUser = String(username || '').trim();
+            if (!trimmedUser) throw new Error('请输入用户名');
+            const trimmedPwd = String(password || '');
+            if (!trimmedPwd) throw new Error('请输入密码');
+
             state.status = 'syncing';
             state.errorMessage = null;
             this._emitChange();
 
             try {
-                const cred = await state.auth.signInWithEmailAndPassword(email.trim(), password);
+                const internalEmail = normalizeUsernameToEmail(trimmedUser);
+                const internalPwd = normalizePassword(trimmedPwd);
+                const cred = await state.auth.signInWithEmailAndPassword(internalEmail, internalPwd);
                 state.status = 'idle';
                 this._emitChange();
                 return cred.user;

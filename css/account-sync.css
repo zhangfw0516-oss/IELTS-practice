@@ -377,3 +377,11 @@
 .account-switch input:checked + .account-slider:before {
     transform: translateX(20px);
 }
+
+.account-link-btn {
+    transition: color 0.2s ease;
+}
+
+.account-link-btn:hover {
+    color: #1d4ed8 !important;
+}
