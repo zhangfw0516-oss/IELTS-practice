@@ -5232,6 +5232,35 @@ body.blue-dark-mode .theme-modal-close:hover {
     border-radius: 10px;
 }
 
+#license-modal .lm-remix-box {
+    padding: 15px 16px;
+    border: 1px solid rgba(36, 95, 120, 0.2);
+    border-left: 4px solid #245f78;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(36, 95, 120, 0.08), rgba(36, 95, 120, 0.025));
+}
+
+#license-modal .lm-remix-box__eyebrow {
+    display: block;
+    margin-bottom: 5px;
+    color: #245f78;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+}
+
+#license-modal .lm-remix-box a {
+    color: #245f78;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+#license-modal .lm-remix-box p + p {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 20px;
+}
+
 #license-modal .lm-footer {
     margin-top: 24px;
     width: 100%;

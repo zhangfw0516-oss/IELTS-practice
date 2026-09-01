@@ -1,6 +1,12 @@
 # IELTS Atlas / IELTS Practice
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sallowayma-git/IELTS-practice)
 
+## 社区改版说明
+
+当前仓库由 [zhangfw0516-oss](https://github.com/zhangfw0516-oss) 基于 [sallowayma-git/IELTS-practice](https://github.com/sallowayma-git/IELTS-practice) 改版维护。改版内容包括 GitHub Pages 在线部署、背单词界面与学习流程优化、熟词标记、真人英式发音入口及移动端适配。
+
+原项目版权与贡献归原作者及各贡献者所有；本改版继续采用 GNU GPL v3 发布，并明确保留原项目来源。详细说明见 [NOTICE.md](NOTICE.md)。
+
 ## 重要使用声明
 
 本项目允许个人基于学习、研究和自用目的进行本地运行、私人部署或在个人控制的网页环境中使用。使用者可以将项目部署到自己的电脑、私人服务器、NAS 或个人网页空间，但应确保访问范围和传播范围可控。

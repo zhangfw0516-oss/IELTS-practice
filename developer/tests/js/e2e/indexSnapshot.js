@@ -57,32 +57,31 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                             vertical-align: middle;
                             display: inline-block;
                         "
-                        >项目仅授权ZYZ Reading Walks
-                        提供分发，小红书号：276752989</span
+                        >社区学习改版 · zhangfw0516-oss 维护</span
                     >
                     <a
-                        href="https://www.xiaohongshu.com/user/profile/5b4d76744eacab058489e72f"
+                        href="https://github.com/zhangfw0516-oss/IELTS-practice"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="hero-badge hero-badge--cta"
                         style="
-                            background: #ff1c1c;
-                            box-shadow: 0 12px 30px rgba(255, 77, 79, 0.35);
+                            background: #245f78;
+                            box-shadow: 0 12px 30px rgba(36, 95, 120, 0.28);
                             text-decoration: none;
                             display: inline-flex;
                             align-items: center;
                             justify-content: center;
                         "
-                        aria-label="小红书主页"
+                        aria-label="查看 zhangfw0516-oss 维护的改版源码"
                     >
-                        小红书
+                        改版源码
                     </a>
                     <a
-                        href="https://github.com/sallowayma-git/IELTS-practice"
+                        href="https://github.com/zhangfw0516-oss/IELTS-practice"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="inline-hover-link"
-                        aria-label="GitHub Repository"
+                        aria-label="GitHub 改版仓库"
                         style="
                             margin-left: auto;
                             margin-right: 20px;
@@ -654,7 +653,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                 问题反馈
                             </a>
                             <a
-                                href="https://github.com/sallowayma-git"
+                                href="https://github.com/zhangfw0516-oss/IELTS-practice"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style="
@@ -664,7 +663,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                     transition: color 0.3s ease;
                                 "
                             >
-                                Salloway呈现
+                                改版维护 · zhangfw0516-oss
                             </a>
                         </div>
                     </div>
@@ -1028,6 +1027,14 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             <div class="lm-card">
                 <h2 class="lm-title">开源项目使用须知</h2>
                 <div class="lm-body">
+                    <div class="lm-remix-box">
+                        <span class="lm-remix-box__eyebrow">当前版本</span>
+                        <p>
+                            <strong>zhangfw0516-oss 改版维护</strong>，基于
+                            <a href="https://github.com/sallowayma-git/IELTS-practice" target="_blank" rel="noopener noreferrer">sallowayma-git 原项目</a>。
+                        </p>
+                        <p>本版增加了在线部署、背单词优化、熟词标记、真人英音和移动端体验改进。</p>
+                    </div>
                     <p>
                         感谢使用！本项目是免费软件，采用
                         <strong>GPL-3.0 License</strong> 发布。
