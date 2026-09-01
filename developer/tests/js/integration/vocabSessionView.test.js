@@ -44,6 +44,8 @@ function patchVocabSessionView(source) {
         startBatch,
         moveToNextWord,
         revealMeaning,
+        markCurrentWordFamiliar,
+        speakCurrentWord,
         submitSpelling,
         applyResult,
         handleCardAction,
@@ -408,7 +410,7 @@ function createMockStore(words = [], config = {}) {
         getDueWords(now) {
             const nowTime = now instanceof Date ? now.getTime() : Date.now();
             return this.words.filter((word) => {
-                if (!word.nextReview) {
+                if (word.familiar || !word.nextReview) {
                     return false;
                 }
                 const time = new Date(word.nextReview).getTime();
@@ -416,7 +418,7 @@ function createMockStore(words = [], config = {}) {
             });
         },
         getNewWords(limit) {
-            const items = this.words.filter((word) => !word.lastReviewed && !word.nextReview);
+            const items = this.words.filter((word) => !word.familiar && !word.lastReviewed && !word.nextReview);
             return items.slice(0, limit);
         },
         getActiveListId() {
@@ -976,7 +978,7 @@ async function run() {
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;img'));
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;svg'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<img'));
-        assert.ok(!elements.sessionCard.innerHTML.includes('<svg'));
+        assert.ok(!elements.sessionCard.innerHTML.includes('<svg onload'));
 
         hooks.state.session.stage = 'spelling';
         hooks.renderCard();
@@ -1040,6 +1042,80 @@ async function run() {
         assert.ok(!spellingMarkup.includes('ˈæl.fə'));
     });
 
+    await record('recognition reveal shows an escaped example and clear memory labels', () => {
+        hooks.resetSessionState();
+        hooks.state.session.currentWord = {
+            id: 'example-1',
+            word: 'emperor',
+            meaning: '皇帝',
+            example: 'The <emperor> ruled wisely.'
+        };
+        hooks.state.session.stage = 'recognition';
+        hooks.state.session.meaningVisible = true;
+
+        hooks.renderCard();
+
+        const markup = elements.sessionCard.innerHTML;
+        assert.ok(markup.includes('vocab-card__example'));
+        assert.ok(markup.includes('The &lt;emperor&gt; ruled wisely.'));
+        assert.ok(!markup.includes('<emperor>'));
+        assert.ok(markup.includes('认识'));
+        assert.ok(markup.includes('有点模糊'));
+        assert.ok(markup.includes('不认识'));
+        assert.ok(markup.includes('data-action="mark-familiar"'));
+        assert.ok(markup.includes('标为熟词'));
+        assert.ok(markup.includes('英式发音'));
+    });
+
+    await record('mark familiar persists the status and removes the word from study', async () => {
+        const store = createMockStore([
+            { id: 'familiar-1', word: 'familiar', meaning: '熟悉的' }
+        ], { masteryCount: 4 });
+        hooks.setStore(store);
+        hooks.resetSessionState();
+        hooks.state.session.stage = 'recognition';
+        hooks.state.session.currentWord = store.words[0];
+        hooks.state.session.progress = { total: 1, completed: 0, correct: 0, near: 0, wrong: 0 };
+        hooks.state.session.activeQueue = [{ ...store.words[0] }];
+        const trigger = createElementStub('button');
+
+        const marked = await hooks.markCurrentWordFamiliar(trigger);
+
+        assert.strictEqual(marked, true);
+        assert.strictEqual(store.words[0].familiar, true);
+        assert.ok(store.words[0].familiarAt);
+        assert.strictEqual(store.words[0].correctCount, 4);
+        assert.strictEqual(store.getNewWords(10).length, 0);
+        assert.strictEqual(hooks.state.session.activeQueue.length, 0);
+        assert.strictEqual(hooks.state.session.stage, 'complete');
+    });
+
+    await record('pronunciation uses an English voice when browser speech is available', () => {
+        let spoken = null;
+        class UtteranceStub {
+            constructor(text) {
+                this.text = text;
+            }
+        }
+        const englishVoice = { lang: 'en-GB', name: 'English' };
+        windowStub.SpeechSynthesisUtterance = UtteranceStub;
+        windowStub.speechSynthesis = {
+            cancel() {},
+            getVoices: () => [englishVoice],
+            speak(utterance) {
+                spoken = utterance;
+            }
+        };
+        hooks.state.session.currentWord = { id: 'speak-1', word: 'emperor' };
+
+        hooks.speakCurrentWord();
+
+        assert.strictEqual(spoken.text, 'emperor');
+        assert.strictEqual(spoken.lang, 'en-GB');
+        assert.strictEqual(spoken.rate, 0.82);
+        assert.strictEqual(spoken.voice, englishVoice);
+    });
+
     await record('feedback renders phonetic as a labeled detail', () => {
         hooks.resetSessionState();
         hooks.state.session.currentWord = {
@@ -1069,6 +1145,8 @@ async function run() {
             markup,
             /<div><dt>音标<\/dt><dd class="vocab-feedback__phonetic">[\s\S]*?<span>ˈbiː\.tə<\/span>[\s\S]*?<\/dd><\/div>/
         );
+        assert.ok(!markup.includes('难度因子'));
+        assert.ok(!markup.includes('当前 EF'));
     });
 
     await record('missing blank and slash-only phonetics omit recognition blocks and feedback rows', () => {

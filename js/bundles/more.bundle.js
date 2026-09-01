@@ -406,11 +406,17 @@
 
     async function exportProgress(words) {
         if (!window.AppData || !window.AppData.vocab) throw new Error('AppData.vocab 未加载');
-        if (!Array.isArray(words)) throw new Error('当前词表尚未加载');
         await window.AppData.ready;
         const config = await window.AppData.vocab.getConfig();
         const listId = config.activeListId || 'default';
-        const entries = words.map(cloneProgressEntry);
+        let entries;
+        if (Array.isArray(words)) {
+            entries = words.map(cloneProgressEntry);
+        } else {
+            const list = await window.AppData.vocab.readList(listId);
+            const listWords = Array.isArray(list) ? list : (list && Array.isArray(list.words) ? list.words : []);
+            entries = listWords.map(cloneProgressEntry);
+        }
         if (entries.some((entry) => !entry)) {
             throw new Error('当前词表包含无效词汇数据');
         }
@@ -1012,6 +1018,10 @@
 
         const correctCountValue = Number(entry.correctCount);
         const correctCount = Number.isFinite(correctCountValue) && correctCountValue >= 0 ? Math.floor(correctCountValue) : 0;
+        const familiar = entry.familiar === true;
+        const familiarAt = entry.familiarAt && !Number.isNaN(new Date(entry.familiarAt).getTime())
+            ? new Date(entry.familiarAt).toISOString()
+            : null;
 
         const lastReviewed = entry.lastReviewed && !Number.isNaN(new Date(entry.lastReviewed).getTime())
             ? new Date(entry.lastReviewed).toISOString()
@@ -1053,6 +1063,10 @@
         }
         if (phonetic) {
             record.phonetic = phonetic;
+        }
+        if (familiar) {
+            record.familiar = true;
+            record.familiarAt = familiarAt || updatedAt;
         }
         [
             'userInput',
@@ -1608,7 +1622,7 @@
         const now = referenceTime instanceof Date ? referenceTime : new Date(referenceTime);
         const due = [];
         state.words.forEach((word) => {
-            if (!word.nextReview) {
+            if (word.familiar === true || !word.nextReview) {
                 return;
             }
             const next = new Date(word.nextReview);
@@ -1624,7 +1638,7 @@
 
     function getNewWords(limit = state.config.dailyNew) {
         const target = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : state.config.dailyNew;
-        const fresh = state.words.filter((word) => !word.lastReviewed || !word.nextReview);
+        const fresh = state.words.filter((word) => word.familiar !== true && (!word.lastReviewed || !word.nextReview));
         return fresh.slice(0, target).map((word) => ({ ...word }));
     }
 
@@ -2870,10 +2884,14 @@
                         <button class="btn btn-icon" type="button" data-action="return-more" aria-label="返回更多工具">←</button>
                         <div class="vocab-topbar__titles">
                             <h2 class="vocab-topbar__heading">背单词</h2>
-                            <p class="vocab-topbar__subtitle">Leitner + 艾宾浩斯调度</p>
+                            <p class="vocab-topbar__subtitle">按你的记忆节奏安排复习</p>
                         </div>
                     </div>
                     <div class="vocab-topbar__section vocab-topbar__section--center" data-vocab-role="progress">
+                        <div class="vocab-progress__label">
+                            <span>本轮进度</span>
+                            <strong data-vocab-role="progress-count">0 / 0</strong>
+                        </div>
                         <div class="vocab-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <div class="vocab-progress__track">
                                 <div class="vocab-progress__fill" data-vocab-role="progress-bar"></div>
@@ -3019,6 +3037,7 @@
             topbar: layout.querySelector('[data-vocab-role=\"topbar\"]'),
             primaryButton: layout.querySelector('[data-action=\"primary-cta\"]'),
             progressBar: layout.querySelector('[data-vocab-role=\"progress-bar\"]'),
+            progressCount: layout.querySelector('[data-vocab-role=\"progress-count\"]'),
             progressStats: layout.querySelector('[data-vocab-role=\"progress-stats\"]'),
             menuButton: layout.querySelector('[data-action=\"toggle-menu\"]'),
             menu: layout.querySelector('[data-vocab-role=\"menu\"]'),
@@ -3105,6 +3124,7 @@
     function navigateToMoreView() {
         const moreView = document.getElementById('more-view');
         const vocabView = document.getElementById('vocab-view');
+        document.body?.classList.remove('vocab-focus-active');
         if (window.app && typeof window.app.navigateToView === 'function') {
             try {
                 window.app.navigateToView('more');
@@ -3787,9 +3807,7 @@
         if (typeof manualPreference === 'boolean') {
             shouldShow = manualPreference;
         } else {
-            const stage = state.session.stage;
-            const hasWord = !!state.session.currentWord;
-            shouldShow = (stage === 'feedback' && hasWord) || state.session.meaningVisible;
+            shouldShow = false;
         }
         setSidePanelExpanded(shouldShow);
     }
@@ -3815,10 +3833,10 @@
         return {
             totalWords: words.length,
             dueCount: due.length,
-            masteredCount: words.filter((word) => Number(word.correctCount) >= Number(config.masteryCount || 4)).length,
+            masteredCount: words.filter((word) => word.familiar === true || Number(word.correctCount) >= Number(config.masteryCount || 4)).length,
             dailyNew: Number(config.dailyNew) || 0,
             reviewLimit: Number(config.reviewLimit) || 0,
-            newCandidateCount: newCandidates.length
+            newCandidateCount: newCandidates.filter((word) => word.familiar !== true).length
         };
     }
 
@@ -3829,6 +3847,14 @@
         const stats = state.session.progress;
         const total = stats.total || 0;
         const accuracy = total ? Math.round((stats.correct / total) * 100) : 0;
+        let pendingCurrent = ['recognition', 'spelling'].includes(state.session.stage) ? 1 : 0;
+        if (state.session.stage === 'feedback' && !state.session.lastAnswer?.saved) {
+            pendingCurrent = 1;
+        }
+        const current = total ? Math.min(stats.completed + pendingCurrent, total) : 0;
+        if (state.elements.progressCount) {
+            state.elements.progressCount.textContent = `${current} / ${total}`;
+        }
         const chips = state.elements.progressStats.querySelectorAll('[data-chip]');
         chips.forEach((chip) => {
             const key = chip.dataset.chip;
@@ -3855,6 +3881,8 @@
         if (!button) {
             return;
         }
+        const sessionIsActive = ['recognition', 'spelling', 'feedback'].includes(state.session.stage);
+        button.hidden = sessionIsActive;
         const stats = computeStats();
         let intent = 'import';
         let label = '导入词表';
@@ -3982,6 +4010,9 @@
     function getWordStatus(word, config) {
         const masteredTarget = Number(config?.masteryCount || 4);
         const correctCount = Number(word?.correctCount || 0);
+        if (word?.familiar === true) {
+            return { label: '熟词', tone: 'familiar' };
+        }
         if (word?.nextReview) {
             const next = new Date(word.nextReview);
             if (!Number.isNaN(next.getTime()) && next <= new Date()) {
@@ -4001,7 +4032,7 @@
     }
 
     function isLearnedWord(word) {
-        return Boolean(word?.lastReviewed || word?.nextReview || Number(word?.correctCount || 0) > 0);
+        return Boolean(word?.familiar || word?.lastReviewed || word?.nextReview || Number(word?.correctCount || 0) > 0);
     }
 
     function analyzeListWords() {
@@ -4027,7 +4058,7 @@
             if (learned) {
                 learnedCount += 1;
             }
-            if (Number(word.correctCount || 0) >= masteryTarget) {
+            if (word.familiar === true || Number(word.correctCount || 0) >= masteryTarget) {
                 masteredCount += 1;
             }
             if (status.tone === 'due') {
@@ -4254,6 +4285,14 @@
             revealMeaning();
             return;
         }
+        if (action === 'speak-word') {
+            speakCurrentWord();
+            return;
+        }
+        if (action === 'mark-familiar') {
+            markCurrentWordFamiliar(trigger);
+            return;
+        }
         if (action === 'recognize-easy') {
             state.session.recognitionQuality = 'easy';
             state.session.stage = 'spelling';
@@ -4331,6 +4370,72 @@
         state.session.meaningVisible = !state.session.meaningVisible;
         state.ui.sidePanelManual = null;
         render();
+    }
+
+    async function markCurrentWordFamiliar(trigger) {
+        const word = state.session.currentWord;
+        if (!word || !state.store || typeof state.store.updateWord !== 'function') {
+            return false;
+        }
+        if (trigger) {
+            trigger.disabled = true;
+            trigger.textContent = '正在保存…';
+        }
+        const now = new Date().toISOString();
+        const config = typeof state.store.getConfig === 'function' ? state.store.getConfig() : {};
+        const masteryTarget = Number(config.masteryCount || 4);
+        try {
+            const committed = await state.store.updateWord(word.id, {
+                familiar: true,
+                familiarAt: now,
+                correctCount: Math.max(Number(word.correctCount || 0), masteryTarget),
+                lastReviewed: now,
+                nextReview: null
+            });
+            if (!committed) {
+                throw new Error('词汇记录不存在');
+            }
+            state.session.activeQueue = state.session.activeQueue.filter((item) => item.id !== word.id);
+            state.session.backlog = state.session.backlog.filter((item) => item.id !== word.id);
+            state.session.progress.completed = Math.min(
+                state.session.progress.total,
+                state.session.progress.completed + 1
+            );
+            state.session.progress.correct += 1;
+            showFeedbackMessage(`“${word.word}”已标为熟词，并移出背词队列`, 'success');
+            announce(`${word.word} 已标为熟词`);
+            moveToNextWord();
+            return true;
+        } catch (error) {
+            showFeedbackMessage(`标记熟词失败：${error.message || error}`, 'error');
+            if (trigger) {
+                trigger.disabled = false;
+                trigger.textContent = '☆ 标为熟词';
+            }
+            return false;
+        }
+    }
+
+    function speakCurrentWord() {
+        const text = String(state.session.currentWord?.word || '').trim();
+        const speech = window.speechSynthesis;
+        const Utterance = window.SpeechSynthesisUtterance;
+        if (!text || !speech || typeof Utterance !== 'function') {
+            announce('当前浏览器暂不支持单词发音');
+            showFeedbackMessage('当前浏览器暂不支持单词发音', 'info');
+            return;
+        }
+        speech.cancel();
+        const utterance = new Utterance(text);
+        utterance.lang = 'en-GB';
+        utterance.rate = 0.82;
+        const voices = typeof speech.getVoices === 'function' ? speech.getVoices() : [];
+        const preferredVoice = voices.find((voice) => /^en-GB/i.test(voice.lang));
+        if (preferredVoice) {
+            utterance.voice = preferredVoice;
+        }
+        speech.speak(utterance);
+        announce(`正在播放 ${text} 的发音`);
     }
 
     function levenshteinDistance(a, b) {
@@ -4809,29 +4914,47 @@
         if (session.stage === 'recognition') {
             const safeWord = escapeHtml(word.word);
             const safeMeaning = escapeHtml(word.meaning || '暂无释义');
+            const safeExample = escapeHtml(word.example || '');
             const phonetic = normalizePhoneticValue(word.phonetic);
             const phoneticBlock = phonetic
                 ? `<div class="vocab-card__phonetic"><span class="visually-hidden">音标：</span><span aria-hidden="true">/</span><span>${escapeHtml(phonetic)}</span><span aria-hidden="true">/</span></div>`
                 : '';
+            const exampleBlock = safeExample
+                ? `<div class="vocab-card__example"><span>例句</span><p>${safeExample}</p></div>`
+                : '';
             const meaningBlock = session.meaningVisible
-                ? `<div class="vocab-card__meaning" data-visible="true">${safeMeaning}</div>`
+                ? `<section class="vocab-card__reveal-panel" data-visible="true">
+                        <div class="vocab-card__meaning">${safeMeaning}</div>
+                        ${exampleBlock}
+                   </section>`
                 : '';
             const revealControl = session.meaningVisible
                 ? ''
-                : '<div class="vocab-card__reveal"><button class="btn btn-soft" type="button" data-action="reveal-meaning">看释义 (F)</button></div>';
+                : '<div class="vocab-card__reveal"><button class="btn btn-soft" type="button" data-action="reveal-meaning">查看释义与例句 <kbd>F</kbd></button></div>';
+            const wordKind = word.lastReviewed || word.nextReview ? '复习词' : '新词';
+            const position = session.progress.total
+                ? Math.min(session.progress.completed + 1, session.progress.total)
+                : 1;
             card.innerHTML = `
                 <div class="vocab-card vocab-card--recognition">
+                    <div class="vocab-card__utility-row">
+                        <div class="vocab-card__step">${wordKind} · 第 ${position} / ${session.progress.total || 1} 个</div>
+                        <button class="vocab-card__familiar" type="button" data-action="mark-familiar" title="已经完全掌握，移出背词队列"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.9L12 3.5Z"></path></svg><span>标为熟词</span></button>
+                    </div>
                     <div class="vocab-card__wordline">
                         <div class="vocab-card__word">${safeWord}</div>
                         ${phoneticBlock}
                     </div>
+                    <button class="vocab-card__pronounce" type="button" data-action="speak-word" aria-label="播放 ${safeWord} 的英式发音">
+                        <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 10v4h3l4 3V7L8 10H5Z"></path><path d="M15 9.5c1.3 1.4 1.3 3.6 0 5"></path><path d="M17.5 7c2.7 2.8 2.7 7.2 0 10"></path></svg></span> 英式发音
+                    </button>
                     ${meaningBlock}
                     ${revealControl}
-                    <p class="vocab-card__instruction">评估你对这个单词的熟悉程度</p>
-                    <div class="vocab-card__actions vocab-card__actions--inline">
-                        <button class="btn btn-soft" type="button" data-action="recognize-easy">简单</button>
-                        <button class="btn btn-primary" type="button" data-action="recognize-good">一般</button>
-                        <button class="btn btn-outline" type="button" data-action="recognize-hard">困难</button>
+                    <p class="vocab-card__instruction">${session.meaningVisible ? '对照释义后，选择最真实的记忆状态' : '先凭记忆判断；拿不准可以查看释义'}</p>
+                    <div class="vocab-card__actions vocab-card__actions--inline vocab-card__ratings" aria-label="选择记忆状态">
+                        <button class="btn vocab-rate vocab-rate--know" type="button" data-action="recognize-easy"><span>认识</span><small>马上能想起</small></button>
+                        <button class="btn vocab-rate vocab-rate--fuzzy" type="button" data-action="recognize-good"><span>有点模糊</span><small>需要提示</small></button>
+                        <button class="btn vocab-rate vocab-rate--unknown" type="button" data-action="recognize-hard"><span>不认识</span><small>重新学习</small></button>
                     </div>
                 </div>
             `;
@@ -4880,11 +5003,7 @@
         if (session.stage === 'feedback') {
             const recognitionQuality = session.lastAnswer?.recognitionQuality || 'good';
             const spellingAttempts = session.lastAnswer?.spellingAttempts || 0;
-            const spellingCorrect = session.lastAnswer?.spellingCorrect !== false;
             const skipped = session.lastAnswer?.skipped || false;
-            const baseEF = session.lastAnswer?.baseEF || word.easeFactor;
-            const finalEF = session.lastAnswer?.finalEF || word.easeFactor;
-            const penalty = session.lastAnswer?.penalty || 0;
             const finalQuality = session.lastAnswer?.finalQuality || recognitionQuality;
             const feedbackKind = finalQuality === 'wrong'
                 ? 'wrong'
@@ -4893,124 +5012,36 @@
             const icon = feedbackKind === 'wrong' ? '❌' : (feedbackKind === 'near' ? '🟡' : '✅');
             const title = skipped
                 ? '已跳过，需要加强'
-                : (feedbackKind === 'wrong' ? '需要加强' : (feedbackKind === 'near' ? '接近了' : '太棒了！'));
-
-            const nextReview = word.nextReview ? new Date(word.nextReview).toLocaleString() : '待安排';
+                : (feedbackKind === 'wrong' ? '这次没记住' : (feedbackKind === 'near' ? '差一点就对了' : '拼写正确'));
             const typedAnswer = session.lastAnswer?.typed ? escapeHtml(session.lastAnswer.typed) : '';
 
-            // SM-2 信息展示
-            const intervalDays = word.interval || 1;
-            const easeFactor = finalEF.toFixed(2);
-            const repetitions = word.repetitions || 0;
-
-            // 拼写结果提示
-            let spellingFeedback = '';
-            if (!skipped) {
-                if (spellingCorrect) {
-                    spellingFeedback = '<p style="color: #48bb78; font-size: 0.875rem; margin: 0.25rem 0;">✓ 拼写正确</p>';
-                } else if (spellingAttempts > 0) {
-                    spellingFeedback = `<p style="color: #f56565; font-size: 0.875rem; margin: 0.25rem 0;">✗ 拼写错误 ${spellingAttempts} 次 (EF -${(penalty).toFixed(2)})</p>`;
-                }
-            } else {
-                spellingFeedback = `<p style="color: #718096; font-size: 0.875rem; margin: 0.25rem 0;">已跳过拼写 (EF -${(penalty).toFixed(2)})</p>`;
-            }
-
-            // 认识质量标签
-            const recognitionLabel = recognitionQuality === 'easy' ? '简单' : recognitionQuality === 'good' ? '一般' : '困难';
-            const recognitionChange = baseEF > word.easeFactor ? `(EF +${(baseEF - (word.easeFactor || 2.5)).toFixed(2)})` : '';
-
-            // 质量分解
-            const isIntraReview = session.lastAnswer?.isIntraReview || false;
-            const cycleType = session.lastAnswer?.cycleType || 'normal';
-            const intraCycles = session.lastAnswer?.intraCycles || 0;
-            const needsContinueIntra = session.lastAnswer?.needsContinueIntra || false;
-            const needsEasyVerification = session.lastAnswer?.needsEasyVerification || false;
-            const saved = session.lastAnswer?.saved || false;
-
-            let qualityBreakdown = '';
-
-            if (needsEasyVerification) {
-                // 安排easy验证
-                qualityBreakdown = `
-                    <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(76, 175, 80, 0.1); border-left: 4px solid #4caf50; border-radius: 8px; font-size: 0.875rem;">
-                        <p style="margin: 0 0 0.5rem; font-weight: 600; color: #2e7d32;">✨ 表现优秀！</p>
-                        <p style="margin: 0.25rem 0; color: #2e7d32;">这个单词将在 20-30 个单词后再次出现进行验证。</p>
-                        <p style="margin: 0.5rem 0 0; font-size: 0.8125rem; color: #2e7d32;">当前 EF：${easeFactor} | 轮内循环：${intraCycles} 次</p>
-                    </div>
-                `;
-            } else if (needsContinueIntra) {
-                // 继续轮内循环
-                const maxCycles = 12;
-                const remaining = maxCycles - intraCycles;
-                qualityBreakdown = `
-                    <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(255, 193, 7, 0.1); border-left: 4px solid #ffc107; border-radius: 8px; font-size: 0.875rem;">
-                        <p style="margin: 0 0 0.5rem; font-weight: 600; color: #856404;">🔄 继续轮内学习</p>
-                        <p style="margin: 0.25rem 0; color: #856404;">这个单词将在 3-8 个单词后再次出现。</p>
-                        <p style="margin: 0.5rem 0 0; font-size: 0.8125rem; color: #856404;">当前 EF：${easeFactor} | 已循环：${intraCycles}/${maxCycles} 次</p>
-                    </div>
-                `;
-            } else if (cycleType === 'easy_verification') {
-                // easy验证结果
-                if (finalQuality === 'easy') {
-                    qualityBreakdown = `
-                        <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(76, 175, 80, 0.1); border-left: 4px solid #4caf50; border-radius: 8px; font-size: 0.875rem;">
-                            <p style="margin: 0 0 0.5rem; font-weight: 600; color: #2e7d32;">🎉 验证通过！</p>
-                            <p style="margin: 0.25rem 0; color: #2e7d32;">单词已正式进入复习队列。</p>
-                            <p style="margin: 0.5rem 0 0; font-size: 0.8125rem; color: #2e7d32;">最终 EF：${easeFactor}</p>
-                        </div>
-                    `;
-                } else {
-                    qualityBreakdown = `
-                        <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(255, 152, 0, 0.1); border-left: 4px solid #ff9800; border-radius: 8px; font-size: 0.875rem;">
-                            <p style="margin: 0 0 0.5rem; font-weight: 600; color: #e65100;">⚠️ 验证未通过</p>
-                            <p style="margin: 0.25rem 0; color: #e65100;">需要重新进入轮内学习。</p>
-                            <p style="margin: 0.5rem 0 0; font-size: 0.8125rem; color: #e65100;">调整后 EF：${easeFactor}</p>
-                        </div>
-                    `;
-                }
-            } else if (isIntraReview) {
-                // 轮内循环中的调整
-                const adjustment = session.lastAnswer?.finalQuality === 'easy' ? '+0.15' :
-                                 session.lastAnswer?.finalQuality === 'good' ? '+0.05' : '-0.10';
-                qualityBreakdown = `
-                    <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(0,0,0,0.02); border-radius: 8px; font-size: 0.875rem;">
-                        <p style="margin: 0 0 0.5rem; font-weight: 600;">🔄 轮内循环调整：</p>
-                        <p style="margin: 0.25rem 0;">认识判断：${recognitionLabel}</p>
-                        ${spellingFeedback}
-                        <p style="margin: 0.25rem 0;">EF 调整：${adjustment}</p>
-                        <p style="margin: 0.5rem 0 0; font-weight: 600; color: #667eea;">当前 EF：${easeFactor} | 循环次数：${intraCycles}</p>
-                    </div>
-                `;
-            } else {
-                // 正常流程或新词
-                const isNewWord = !word.lastReviewed;
-                if (isNewWord) {
-                    const initialEF = state.scheduler.INITIAL_EASE_FACTORS[finalQuality] || 2.5;
-                    qualityBreakdown = `
-                        <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(33, 150, 243, 0.1); border-left: 4px solid #2196f3; border-radius: 8px; font-size: 0.875rem;">
-                            <p style="margin: 0 0 0.5rem; font-weight: 600; color: #1565c0;">🆕 新词学习</p>
-                            <p style="margin: 0.25rem 0; color: #1565c0;">认识判断：${recognitionLabel}</p>
-                            ${spellingFeedback}
-                            <p style="margin: 0.5rem 0 0; font-weight: 600; color: #1565c0;">起始难度因子：${initialEF}</p>
-                        </div>
-                    `;
-                } else {
-                    qualityBreakdown = `
-                        <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(0,0,0,0.02); border-radius: 8px; font-size: 0.875rem;">
-                            <p style="margin: 0 0 0.5rem; font-weight: 600;">📈 复习完成：</p>
-                            <p style="margin: 0.25rem 0;">认识判断：${recognitionLabel}</p>
-                            ${spellingFeedback}
-                            <p style="margin: 0.5rem 0 0; font-weight: 600; color: #667eea;">最终难度因子：${easeFactor}</p>
-                        </div>
-                    `;
-                }
+            let planTitle = '已安排复习';
+            let planText = word.nextReview
+                ? `下次复习：${formatDateTime(word.nextReview)}`
+                : '系统会按照你的表现自动安排下次复习。';
+            if (session.lastAnswer?.needsEasyVerification) {
+                planTitle = '稍后再确认一次';
+                planText = '这个词会在本轮后面再次出现，确认你是真的记住了。';
+            } else if (session.lastAnswer?.needsContinueIntra) {
+                planTitle = '本轮还会再见';
+                planText = '系统会在后面自动插入这个词，帮你把记忆加深。';
+            } else if (skipped || feedbackKind === 'wrong') {
+                planTitle = '已经加强安排';
+                planText = '这个词会更早再次出现，不用现在死记。';
             }
 
             const safeWord = escapeHtml(word.word);
             const safeMeaning = escapeHtml(word.meaning || '暂无释义');
+            const safeExample = escapeHtml(word.example || '');
             const phonetic = normalizePhoneticValue(word.phonetic);
             const phoneticDetail = phonetic
                 ? `<div><dt>音标</dt><dd class="vocab-feedback__phonetic"><span aria-hidden="true">/</span><span>${escapeHtml(phonetic)}</span><span aria-hidden="true">/</span></dd></div>`
+                : '';
+            const exampleDetail = safeExample
+                ? `<div class="vocab-feedback__wide"><dt>例句</dt><dd>${safeExample}</dd></div>`
+                : '';
+            const typedDetail = typedAnswer && (feedbackKind !== 'correct' || typedAnswer.toLowerCase() !== safeWord.toLowerCase())
+                ? `<p class="vocab-feedback__typed">你的拼写：${typedAnswer}</p>`
                 : '';
             card.innerHTML = `
                 <div class="vocab-card vocab-card--feedback vocab-card--${feedbackKind}">
@@ -5018,21 +5049,22 @@
                         <span class="vocab-feedback__icon">${icon}</span>
                         <div>
                             <h3>${title}</h3>
-                            <p>将于 ${nextReview} 再次复习</p>
+                            <p>${feedbackKind === 'correct' ? '这个词已经记入本轮进度' : '看一眼正确答案，继续往下就好'}</p>
                         </div>
                     </div>
                     <dl class="vocab-feedback__details">
                         <div><dt>正确拼写</dt><dd>${safeWord}</dd></div>
                         ${phoneticDetail}
-                        <div><dt>释义</dt><dd>${safeMeaning}</dd></div>
-                        <div><dt>间隔天数</dt><dd>${intervalDays} 天</dd></div>
-                        <div><dt>难度因子</dt><dd>${easeFactor}</dd></div>
-                        <div><dt>连续正确</dt><dd>${repetitions} 次</dd></div>
+                        <div class="vocab-feedback__wide"><dt>释义</dt><dd>${safeMeaning}</dd></div>
+                        ${exampleDetail}
                     </dl>
-                    ${typedAnswer ? `<p class="vocab-feedback__typed">你的回答：${typedAnswer}</p>` : ''}
-                    ${qualityBreakdown}
-                    <div class="vocab-card__actions vocab-card__actions--inline" style="margin-top: 1rem;">
-                        <button class="btn btn-primary" type="button" data-action="next-word">下一词 (Enter)</button>
+                    ${typedDetail}
+                    <div class="vocab-feedback__plan">
+                        <strong>${planTitle}</strong>
+                        <p>${planText}</p>
+                    </div>
+                    <div class="vocab-card__actions vocab-card__actions--center">
+                        <button class="btn btn-primary" type="button" data-action="next-word">下一个单词 <kbd>Enter</kbd></button>
                     </div>
                 </div>
             `;
@@ -5101,6 +5133,7 @@
             console.warn('[VocabSessionView] 容器不存在');
             return;
         }
+        document.body?.classList.add('vocab-focus-active');
         target.removeAttribute('hidden');
         state.container = target;
         if (!state.initialized) {

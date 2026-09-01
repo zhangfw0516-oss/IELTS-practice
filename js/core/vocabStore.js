@@ -206,6 +206,10 @@
 
         const correctCountValue = Number(entry.correctCount);
         const correctCount = Number.isFinite(correctCountValue) && correctCountValue >= 0 ? Math.floor(correctCountValue) : 0;
+        const familiar = entry.familiar === true;
+        const familiarAt = entry.familiarAt && !Number.isNaN(new Date(entry.familiarAt).getTime())
+            ? new Date(entry.familiarAt).toISOString()
+            : null;
         
         const lastReviewed = entry.lastReviewed && !Number.isNaN(new Date(entry.lastReviewed).getTime())
             ? new Date(entry.lastReviewed).toISOString()
@@ -247,6 +251,10 @@
         }
         if (phonetic) {
             record.phonetic = phonetic;
+        }
+        if (familiar) {
+            record.familiar = true;
+            record.familiarAt = familiarAt || updatedAt;
         }
         [
             'userInput',
@@ -802,7 +810,7 @@
         const now = referenceTime instanceof Date ? referenceTime : new Date(referenceTime);
         const due = [];
         state.words.forEach((word) => {
-            if (!word.nextReview) {
+            if (word.familiar === true || !word.nextReview) {
                 return;
             }
             const next = new Date(word.nextReview);
@@ -818,7 +826,7 @@
 
     function getNewWords(limit = state.config.dailyNew) {
         const target = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : state.config.dailyNew;
-        const fresh = state.words.filter((word) => !word.lastReviewed || !word.nextReview);
+        const fresh = state.words.filter((word) => word.familiar !== true && (!word.lastReviewed || !word.nextReview));
         return fresh.slice(0, target).map((word) => ({ ...word }));
     }
 

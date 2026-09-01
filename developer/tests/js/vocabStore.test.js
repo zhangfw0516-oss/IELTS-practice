@@ -1055,6 +1055,34 @@ async function testExternalListCommitInvalidatesCacheAndRefreshesActiveList() {
     }
 }
 
+async function testFamiliarWordsPersistAndLeaveStudyQueues() {
+    const now = new Date('2026-09-01T00:00:00.000Z');
+    const vocabStore = loadVocabStore({
+        embeddedWords: [],
+        dataSeed: {
+            words: [
+                { id: 'known-1', word: 'known', meaning: '已知的' },
+                { id: 'fresh-1', word: 'fresh', meaning: '新的' }
+            ]
+        }
+    });
+
+    await vocabStore.init();
+    const marked = await vocabStore.updateWord('known-1', {
+        familiar: true,
+        familiarAt: now.toISOString(),
+        correctCount: 4,
+        lastReviewed: now.toISOString(),
+        nextReview: new Date(now.getTime() - 60_000).toISOString()
+    });
+
+    assert.strictEqual(marked.familiar, true);
+    assert.strictEqual(marked.familiarAt, now.toISOString());
+    assert.ok(!vocabStore.getNewWords(10).some((word) => word.id === 'known-1'));
+    assert.ok(!vocabStore.getDueWords(now).some((word) => word.id === 'known-1'));
+    assert.ok(vocabStore.getNewWords(10).some((word) => word.id === 'fresh-1'));
+}
+
 async function main() {
     const results = [];
     try {
@@ -1090,6 +1118,8 @@ async function main() {
         results.push({ name: '阅读高亮旧 note 音标只投影且显式字段优先', status: 'pass' });
         await testExternalListCommitInvalidatesCacheAndRefreshesActiveList();
         results.push({ name: '外部词表提交会失效缓存并刷新激活词表', status: 'pass' });
+        await testFamiliarWordsPersistAndLeaveStudyQueues();
+        results.push({ name: '熟词标记持久化并退出学习队列', status: 'pass' });
         console.log(JSON.stringify({
             status: 'pass',
             detail: `${results.length}/${results.length} 测试通过`,
