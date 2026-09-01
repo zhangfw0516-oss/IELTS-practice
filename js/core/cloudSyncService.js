@@ -5,12 +5,14 @@
 (function(window) {
     'use strict';
 
-    const SYNC_DEBOUNCE_MS = 5000;
+    const SYNC_DEBOUNCE_MS = 10000;
     const LAST_SYNC_KEY = 'ielts_atlas_last_sync_timestamp';
+    const AUTO_SYNC_SETTING_KEY = 'ielts_atlas_auto_sync_enabled';
 
     const state = {
         initialized: false,
         isConfigured: false,
+        autoSyncEnabled: localStorage.getItem(AUTO_SYNC_SETTING_KEY) === 'true', // 默认关闭，由用户主动控制
         firebaseApp: null,
         auth: null,
         db: null,
@@ -147,7 +149,9 @@
             const tryAttach = () => {
                 if (window.AppData && typeof window.AppData.subscribe === 'function') {
                     window.AppData.subscribe(() => {
-                        this.scheduleAutoSync();
+                        if (state.autoSyncEnabled) {
+                            this.scheduleAutoSync();
+                        }
                     });
                     return true;
                 }
@@ -165,7 +169,7 @@
          * 安排防抖自动云端上传
          */
         scheduleAutoSync() {
-            if (!state.currentUser || !state.db) return;
+            if (!state.autoSyncEnabled || !state.currentUser || !state.db) return;
             if (state.debounceTimer) clearTimeout(state.debounceTimer);
 
             state.debounceTimer = setTimeout(() => {
@@ -372,11 +376,38 @@
         },
 
         /**
+         * 设置是否开启自动后台同步
+         */
+        setAutoSyncEnabled(enabled) {
+            state.autoSyncEnabled = !!enabled;
+            localStorage.setItem(AUTO_SYNC_SETTING_KEY, String(state.autoSyncEnabled));
+            this._emitChange();
+            if (typeof window.showToast === 'function') {
+                window.showToast(state.autoSyncEnabled ? '⚡ 自动云同步已开启' : '🔒 自动云同步已关闭（已切换为手动一键同步）', 'info');
+            }
+        },
+
+        /**
+         * 当前是否启用了自动同步
+         */
+        isAutoSyncEnabled() {
+            return state.autoSyncEnabled;
+        },
+
+        /**
+         * 手动一键同步（先上传本地数据到云端，保证云端最新）
+         */
+        async syncNow() {
+            return this.pushToCloud({ silent: false });
+        },
+
+        /**
          * 获取当前服务状态
          */
         getState() {
             return {
                 isConfigured: state.isConfigured,
+                autoSyncEnabled: state.autoSyncEnabled,
                 currentUser: state.currentUser,
                 status: state.status,
                 lastSyncTime: state.lastSyncTime,

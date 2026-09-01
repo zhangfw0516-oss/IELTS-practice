@@ -294,17 +294,30 @@
                         </div>
                     ` : ''}
 
-                    <div class="account-actions-grid">
-                        <button type="button" class="account-btn account-btn-primary" id="btn-sync-push" ${state.status === 'syncing' ? 'disabled' : ''}>
-                            ☁️ 上传到云端
-                        </button>
-                        <button type="button" class="account-btn account-btn-secondary" id="btn-sync-pull" ${state.status === 'syncing' ? 'disabled' : ''}>
-                            ⬇️ 从云端恢复
+                    <div class="account-actions-grid" style="grid-template-columns: 1fr;">
+                        <button type="button" class="account-btn account-btn-primary" id="btn-sync-push" style="padding: 14px; font-size: 1rem;" ${state.status === 'syncing' ? 'disabled' : ''}>
+                            ${state.status === 'syncing' ? '🔄 正在同步云端数据...' : '☁️ 立即同步（上传当前进度）'}
                         </button>
                     </div>
 
-                    <div class="account-help-note">
-                        ⚡ <strong>自动同步已启用</strong>：每次完成练习或背单词后，系统会在后台自动将最新记录保存至云端。
+                    <div class="account-actions-grid">
+                        <button type="button" class="account-btn account-btn-secondary" id="btn-sync-pull" ${state.status === 'syncing' ? 'disabled' : ''}>
+                            ⬇️ 从云端还原数据
+                        </button>
+                        <button type="button" class="account-btn account-btn-secondary" id="btn-switch-config">
+                            ⚙️ 项目配置
+                        </button>
+                    </div>
+
+                    <div class="account-toggle-row" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--bg-secondary, #f8fafc); border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); margin-top: 4px;">
+                        <div>
+                            <div style="font-weight: 600; font-size: 0.9rem;">自动后台同步</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">关闭后仅在点击「立即同步」时保存，极大节省调用次数</div>
+                        </div>
+                        <label class="account-switch" style="position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer;">
+                            <input type="checkbox" id="auto-sync-checkbox" ${state.autoSyncEnabled ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+                            <span class="account-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${state.autoSyncEnabled ? '#2563eb' : '#cbd5e1'}; transition: .3s; border-radius: 24px;"></span>
+                        </label>
                     </div>
 
                     <button type="button" class="account-btn account-btn-danger" id="btn-account-logout" style="margin-top: 8px;">
@@ -315,7 +328,7 @@
 
             container.querySelector('#btn-sync-push').addEventListener('click', async () => {
                 try {
-                    await window.CloudSyncService.pushToCloud();
+                    await window.CloudSyncService.syncNow();
                 } catch (e) {}
             });
 
@@ -326,6 +339,24 @@
                     } catch (e) {}
                 }
             });
+
+            const autoSyncCheckbox = container.querySelector('#auto-sync-checkbox');
+            if (autoSyncCheckbox) {
+                autoSyncCheckbox.addEventListener('change', (e) => {
+                    window.CloudSyncService.setAutoSyncEnabled(e.target.checked);
+                    const slider = container.querySelector('.account-slider');
+                    if (slider) {
+                        slider.style.backgroundColor = e.target.checked ? '#2563eb' : '#cbd5e1';
+                    }
+                });
+            }
+
+            const switchConfigBtn = container.querySelector('#btn-switch-config');
+            if (switchConfigBtn) {
+                switchConfigBtn.addEventListener('click', () => {
+                    this.renderConfigTab(container, state);
+                });
+            }
 
             container.querySelector('#btn-account-logout').addEventListener('click', async () => {
                 await window.CloudSyncService.logout();
