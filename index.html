@@ -13,6 +13,7 @@
         <link rel="stylesheet" href="css/heroui-bridge.css" />
         <link rel="stylesheet" href="css/theme-switcher-scroll.css" />
         <link rel="stylesheet" href="css/onboarding.css" />
+        <link rel="stylesheet" href="css/account-sync.css" />
     </head>
 
     <body class="hero-body boot-active" data-theme="heroui">
@@ -1377,6 +1378,14 @@
 
         <!-- 入口与懒加载代理 -->
         <script src="js/bundles/legacy-app.bundle.js"></script>
+
+        <!-- Firebase 与多端云同步系统 -->
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+        <script src="js/config/firebaseConfig.js"></script>
+        <script src="js/core/cloudSyncService.js"></script>
+        <script src="js/components/accountModal.js"></script>
 
         <!-- 成就系统模态框 -->
         <div id="achievements-modal" class="theme-modal">

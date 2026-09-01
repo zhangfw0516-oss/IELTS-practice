@@ -1,0 +1,357 @@
+/* ==========================================================================
+   IELTS Atlas - Cloud Account & Multi-Device Sync Styles
+   ========================================================================== */
+
+/* 顶部状态徽标 / 导航入口 */
+.hero-account-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary, #1e293b);
+    background: var(--card-bg, rgba(255, 255, 255, 0.85));
+    border: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    text-decoration: none;
+    user-select: none;
+    margin-left: 8px;
+}
+
+.hero-account-badge:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent-primary, #2563eb);
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.15);
+}
+
+.hero-account-badge:active {
+    transform: translateY(0);
+}
+
+.account-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #94a3b8;
+    transition: background-color 0.3s ease;
+    flex-shrink: 0;
+}
+
+.account-status-dot.status-synced {
+    background-color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.account-status-dot.status-syncing {
+    background-color: #3b82f6;
+    animation: account-pulse 1.2s infinite ease-in-out;
+}
+
+.account-status-dot.status-error {
+    background-color: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes account-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.5; }
+}
+
+/* 账号与同步弹窗 */
+.account-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.account-modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.account-modal-card {
+    background: var(--bg-card, #ffffff);
+    color: var(--text-primary, #0f172a);
+    width: 100%;
+    max-width: 440px;
+    border-radius: 20px;
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.2), 0 0 0 1px var(--border-color, rgba(0, 0, 0, 0.06));
+    overflow: hidden;
+    transform: scale(0.95) translateY(10px);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.account-modal-overlay.active .account-modal-card {
+    transform: scale(1) translateY(0);
+}
+
+.account-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-color, #f1f5f9);
+}
+
+.account-modal-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.account-modal-close {
+    background: transparent;
+    border: none;
+    font-size: 1.4rem;
+    line-height: 1;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.account-modal-close:hover {
+    color: var(--text-primary, #0f172a);
+    background: var(--bg-hover, #f1f5f9);
+}
+
+.account-modal-body {
+    padding: 20px 24px 24px;
+}
+
+/* 标签切换栏 */
+.account-tabs {
+    display: flex;
+    background: var(--bg-secondary, #f8fafc);
+    padding: 4px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    gap: 4px;
+}
+
+.account-tab-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.account-tab-btn.active {
+    background: var(--bg-card, #ffffff);
+    color: var(--text-primary, #0f172a);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+/* 表单元素 */
+.account-form-group {
+    margin-bottom: 16px;
+}
+
+.account-form-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary, #475569);
+    margin-bottom: 6px;
+}
+
+.account-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.account-form-input {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, #cbd5e1);
+    background: var(--bg-input, #ffffff);
+    color: var(--text-primary, #0f172a);
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.account-form-input:focus {
+    outline: none;
+    border-color: var(--accent-primary, #2563eb);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* 提示与提示条 */
+.account-alert {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-alert.alert-error {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.account-alert.alert-info {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #dbeafe;
+}
+
+.account-alert.alert-success {
+    background: #f0fdf4;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+}
+
+/* 操作按钮 */
+.account-btn {
+    width: 100%;
+    padding: 11px 16px;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.account-btn-primary {
+    background: var(--accent-primary, #2563eb);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.account-btn-primary:hover {
+    background: #1d4ed8;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+}
+
+.account-btn-secondary {
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-primary, #334155);
+}
+
+.account-btn-secondary:hover {
+    background: #e2e8f0;
+}
+
+.account-btn-danger {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.account-btn-danger:hover {
+    background: #fecaca;
+}
+
+/* 已登录面板 */
+.account-profile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.account-user-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--bg-secondary, #f8fafc);
+    border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.account-avatar-circle {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.account-user-meta {
+    overflow: hidden;
+}
+
+.account-user-email {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary, #0f172a);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-sync-subtext {
+    font-size: 0.8rem;
+    color: var(--text-muted, #64748b);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.account-actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+/* 帮助与说明折叠 */
+.account-help-note {
+    font-size: 0.8rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1.5;
+    background: var(--bg-secondary, #f8fafc);
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-top: 14px;
+}
+
+.account-help-note code {
+    font-family: monospace;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 2px 4px;
+    border-radius: 4px;
+}
