@@ -7,14 +7,15 @@
 
     const STORAGE_KEY = 'ielts_atlas_firebase_config';
 
-    // 默认内置配置（如未填入，则优先从 localStorage 读取或引导用户填入）
+    // 默认内置配置（全站统一连接，免除任何用户手动配置）
     const DEFAULT_CONFIG = {
-        apiKey: "",
-        authDomain: "",
-        projectId: "",
-        storageBucket: "",
-        messagingSenderId: "",
-        appId: ""
+        apiKey: "AIzaSyCp7e_zJlqzDv3BXGkQG4Xj9E6Di98RPco",
+        authDomain: "ielts-57ef8.firebaseapp.com",
+        projectId: "ielts-57ef8",
+        storageBucket: "ielts-57ef8.firebasestorage.app",
+        messagingSenderId: "819558732849",
+        appId: "1:819558732849:web:f77fd25340e9737edcb110",
+        measurementId: "G-GFDT45QRKN"
     };
 
     const FirebaseConfigManager = {
