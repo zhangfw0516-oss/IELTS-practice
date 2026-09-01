@@ -149,7 +149,13 @@
                     totalWordsEl.textContent = vocab.totalWords;
                 }
 
-                // 2. 如果存在 AppData，抓取真实练习记录做题时长并累加背单词时长
+                // 2. 预先更新背单词累计时长（避免等待 AppData 异步延迟）
+                const studyTimeEl = document.getElementById('study-time');
+                if (studyTimeEl) {
+                    studyTimeEl.textContent = Math.round(vocab.totalVocabSeconds / 60);
+                }
+
+                // 3. 如果存在 AppData，抓取真实练习记录做题时长并累加背单词时长
                 if (window.AppData && window.AppData.practice) {
                     await window.AppData.ready;
                     const summaries = await window.AppData.practice.list();
@@ -160,7 +166,6 @@
                         });
 
                         const combinedMinutes = Math.round((practiceTotalDuration + vocab.totalVocabSeconds) / 60);
-                        const studyTimeEl = document.getElementById('study-time');
                         if (studyTimeEl) {
                             studyTimeEl.textContent = combinedMinutes;
                         }
@@ -175,8 +180,16 @@
     window.StudyStatsManager = StudyStatsManager;
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => StudyStatsManager.init());
+        document.addEventListener('DOMContentLoaded', () => {
+            StudyStatsManager.init();
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.addEventListener('click', () => setTimeout(() => StudyStatsManager.render(), 80));
+            });
+        });
     } else {
         StudyStatsManager.init();
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => setTimeout(() => StudyStatsManager.render(), 80));
+        });
     }
 })(window);

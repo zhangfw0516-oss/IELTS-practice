@@ -441,3 +441,850 @@
         font-size: 1.6rem;
     }
 }
+
+/* 背单词模式选择仪表盘与卡片动画 - 屏幕正中心居中 */
+.vocab-mode-dashboard {
+    max-width: 840px;
+    width: 100%;
+    margin: auto !important;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(82vh - 64px);
+    box-sizing: border-box;
+    animation: vocabFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes vocabFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.vocab-mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    width: 100%;
+    max-width: 760px;
+}
+
+/* 单词卡片背诵主体居中 */
+.vocab-body {
+    display: flex !important;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(82vh - 64px);
+    padding: 20px !important;
+}
+
+.vocab-body__container {
+    width: min(920px, 100%) !important;
+    margin: auto !important;
+}
+
+.vocab-mode-card {
+    background: var(--card-bg, rgba(255, 255, 255, 0.75));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
+    border-radius: 24px;
+    padding: 32px 28px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    position: relative;
+    overflow: hidden;
+}
+
+.vocab-mode-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.08);
+    border-color: rgba(37, 99, 235, 0.3);
+}
+
+.vocab-mode-card:active {
+    transform: translateY(-2px) scale(0.99);
+}
+
+.vocab-mode-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.vocab-mode-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+.vocab-mode-badge {
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+    font-weight: 600;
+}
+
+.vocab-mode-number {
+    font-size: 2.8rem;
+    font-weight: 800;
+    color: #f59e0b;
+    line-height: 1;
+    margin-bottom: 12px;
+    letter-spacing: -0.5px;
+}
+
+.vocab-mode-desc {
+    font-size: 0.92rem;
+    color: var(--text-secondary, #64748b);
+    line-height: 1.5;
+    margin-bottom: 24px;
+}
+
+.vocab-mode-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--accent-primary, #2563eb);
+    transition: gap 0.2s ease;
+}
+
+.vocab-mode-card:hover .vocab-mode-action-btn {
+    gap: 12px;
+}
+
+@media (max-width: 640px) {
+    .vocab-mode-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .vocab-mode-card {
+        padding: 24px 20px;
+    }
+    .vocab-mode-number {
+        font-size: 2.2rem;
+    }
+}
+
+/* 常驻范围胶囊切换器 (Scope Capsules) */
+.vocab-scope-capsules {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(241, 245, 249, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    padding: 4px;
+    border-radius: 9999px;
+    margin: 0 auto 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.vocab-scope-capsule {
+    border: none;
+    background: transparent;
+    padding: 7px 18px;
+    border-radius: 9999px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vocab-scope-capsule:hover {
+    color: var(--text-primary, #0f172a);
+}
+
+.vocab-scope-capsule.is-active {
+    background: #ffffff;
+    color: #0f172a;
+    font-weight: 600;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.vocab-scope-capsule__count {
+    font-size: 0.78rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.2);
+    color: inherit;
+}
+
+.vocab-scope-capsule.is-active .vocab-scope-capsule__count {
+    background: rgba(245, 158, 11, 0.18);
+    color: #d97706;
+}
+
+/* 底部磨砂玻璃悬浮工具栏 (Floating Action Dock) */
+.vocab-dock-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+}
+
+.vocab-dock {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 9999px;
+    padding: 8px 16px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.03);
+    gap: 6px;
+}
+
+.vocab-dock__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    color: #475569;
+    gap: 4px;
+}
+
+.vocab-dock__item:hover {
+    background: rgba(241, 245, 249, 0.8);
+    transform: translateY(-2px);
+    color: #ea580c;
+}
+
+.vocab-dock__item:active {
+    transform: translateY(0) scale(0.96);
+}
+
+.vocab-dock__icon {
+    font-size: 1.4rem;
+    line-height: 1;
+}
+
+.vocab-dock__label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+.vocab-dock__divider {
+    width: 1px;
+    height: 28px;
+    background: rgba(203, 213, 225, 0.6);
+    margin: 0 4px;
+}
+
+/* 沉浸刷词、听写、随手拼全屏交互面板 */
+.vocab-tool-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: toolModalFadeIn 0.25s ease;
+}
+
+@keyframes toolModalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.vocab-tool-dialog {
+    background: #ffffff;
+    border-radius: 28px;
+    width: min(640px, 100%);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    animation: toolDialogPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toolDialogPop {
+    from { transform: scale(0.95) translateY(12px); }
+    to { transform: scale(1) translateY(0); }
+}
+
+.vocab-tool-header {
+    padding: 20px 24px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.vocab-tool-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.vocab-tool-close-btn {
+    border: none;
+    background: #f1f5f9;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    color: #64748b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.vocab-tool-close-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.vocab-tool-content {
+    padding: 28px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* 沉浸刷词专有卡片 */
+.immersive-word-card {
+    text-align: center;
+    padding: 36px 20px;
+}
+
+.immersive-word-title {
+    font-size: 3.2rem;
+    font-weight: 800;
+    color: #ea580c;
+    margin-bottom: 12px;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+}
+
+.immersive-word-phonetic {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #f8fafc;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-family: monospace;
+    font-size: 0.95rem;
+    color: #64748b;
+    cursor: pointer;
+    margin-bottom: 24px;
+    border: 1px solid #e2e8f0;
+}
+
+.immersive-word-phonetic:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+.immersive-meaning-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    padding: 24px;
+    margin: 20px auto;
+    max-width: 500px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.immersive-meaning-box.is-masked .immersive-meaning-text {
+    filter: blur(8px);
+    opacity: 0.4;
+    user-select: none;
+}
+
+.immersive-meaning-hint {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-top: 10px;
+}
+
+.immersive-example-box {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    font-style: italic;
+    color: #475569;
+    font-size: 0.98rem;
+    line-height: 1.5;
+    text-align: left;
+}
+
+.immersive-nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    border-top: 1px solid #f1f5f9;
+    background: #f8fafc;
+}
+
+/* 听写与随手拼按钮与输入框 */
+.quick-spell-input {
+    width: 100%;
+    font-size: 1.8rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 2px;
+    padding: 14px;
+    border: 2px solid #cbd5e1;
+    border-radius: 16px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    color: #0f172a;
+}
+
+.quick-spell-input:focus {
+    border-color: #ea580c;
+}
+
+/* 单词列表视图 (Wordlist View - 对标图1) */
+.vocab-wordlist-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: wordlistIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes wordlistIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.vocab-wordlist-topbar {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid #e2e8f0;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vocab-wordlist-search-bar {
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.vocab-wordlist-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 20px 100px; /* 留出底部悬浮dock空间 */
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.vocab-wordlist-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background: #ffffff;
+}
+
+.vocab-wordlist-row:hover {
+    background: #f8fafc;
+    transform: translateX(3px);
+}
+
+.vocab-wordlist-row:active {
+    background: #f1f5f9;
+}
+
+.vocab-wordlist-row:first-child {
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+}
+
+.vocab-wordlist-row:last-child {
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 16px;
+    border-bottom: none;
+}
+
+/* 列表底部悬浮 3 大工具栏 (Floating Bottom Dock) */
+.vocab-wordlist-dock {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 960;
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04);
+    gap: 8px;
+}
+
+/* 站内权威词典抽屉 (In-App Cambridge Dictionary Drawer) */
+.vocab-dict-drawer {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: flex-end;
+    animation: drawerFadeIn 0.25s ease;
+}
+
+@keyframes drawerFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.vocab-dict-drawer-panel {
+    background: #ffffff;
+    width: min(520px, 100vw);
+    height: 100%;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    animation: drawerSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawerSlideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+
+.vocab-dict-body {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.vocab-dict-pos-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-style: italic;
+    margin-right: 8px;
+}
+
+.vocab-dict-def-item {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.vocab-dict-def-en {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1e293b;
+    line-height: 1.5;
+    margin-bottom: 6px;
+}
+
+.vocab-dict-def-cn {
+    font-size: 0.92rem;
+    color: #475569;
+    margin-bottom: 8px;
+}
+
+.vocab-dict-example {
+    font-size: 0.88rem;
+    color: #64748b;
+    font-style: italic;
+    background: #f8fafc;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border-left: 3px solid #cbd5e1;
+    margin-top: 6px;
+}
+/* ==========================================================================
+   双关穿插背词与组末集中拼写样式 (适配桌面与移动端自然宽度)
+   ========================================================================== */
+
+/* 单词侧面两关小圆点指示器 */
+.vocab-phase-dots {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 6px;
+    vertical-align: middle;
+    user-select: none;
+}
+
+.vocab-phase-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #cbd5e1;
+    transition: all 0.25s ease;
+}
+
+.vocab-phase-dot.is-done {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.45);
+}
+
+/* 单词行容器 */
+.vocab-twopass-wordline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    padding: 10px 0 16px;
+    border-bottom: 1px dashed rgba(176, 145, 113, 0.35);
+}
+
+.vocab-twopass-word-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.vocab-twopass-word {
+    font-size: clamp(38px, 5.5vw, 60px);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--vocab-ink, #2d241e);
+    margin: 0;
+    line-height: 1.1;
+}
+
+/* 遮罩/骨架条释义 */
+.vocab-masked-strip {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed rgba(176, 145, 113, 0.45);
+    border-radius: 12px;
+    padding: 14px 20px;
+    text-align: center;
+    color: #64748b;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.vocab-masked-strip:hover {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: #ea580c;
+    color: #0f172a;
+}
+
+/* 揭晓后的释义面板 */
+.vocab-revealed-panel {
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 14px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    padding: 18px 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.vocab-revealed-def {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.vocab-revealed-example {
+    font-size: 1rem;
+    color: #334155;
+    line-height: 1.6;
+    padding-top: 10px;
+    border-top: 1px solid #f1f5f9;
+}
+
+.vocab-revealed-example strong {
+    color: #0f172a;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.vocab-revealed-example-cn {
+    color: #64748b;
+    font-size: 0.92rem;
+    margin-top: 4px;
+}
+
+/* 第二关盲测横幅 */
+.vocab-blind-banner {
+    background: rgba(254, 243, 199, 0.7);
+    border: 1px solid #fde68a;
+    border-radius: 10px;
+    padding: 10px 16px;
+    text-align: center;
+    color: #92400e;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+/* 底部操作按钮网格 */
+.vocab-action-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.vocab-action-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.vocab-flow-btn {
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 1.18rem;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    letter-spacing: 0.03em;
+    transition: all 0.15s ease;
+    user-select: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.vocab-flow-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.06);
+}
+
+.vocab-flow-btn--green {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+}
+.vocab-flow-btn--green:hover {
+    background: #10b981;
+    color: #ffffff;
+}
+
+.vocab-flow-btn--yellow {
+    background: #fffbeb;
+    color: #92400e;
+    border-color: #fde68a;
+}
+.vocab-flow-btn--yellow:hover {
+    background: #f59e0b;
+    color: #ffffff;
+}
+
+.vocab-flow-btn--red {
+    background: #fef2f2;
+    color: #991b1b;
+    border-color: #fecaca;
+}
+.vocab-flow-btn--red:hover {
+    background: #ef4444;
+    color: #ffffff;
+}
+
+/* 组末统一拼写模式卡片 */
+.vocab-batch-spell-box {
+    text-align: center;
+    padding: 24px 20px;
+}
+
+.vocab-batch-spell-def {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.4;
+    margin: 12px 0 20px;
+}
+
+.vocab-batch-spell-input {
+    width: min(420px, 100%);
+    margin: 0 auto;
+    padding: 12px 20px;
+    font-size: 1.35rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0.05em;
+    border: 2px solid #cbd5e1;
+    border-radius: 12px;
+    outline: none;
+    background: #ffffff;
+    transition: all 0.2s;
+}
+
+.vocab-batch-spell-input:focus {
+    border-color: #ea580c;
+    box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.15);
+}
+
+.vocab-batch-spell-msg {
+    min-height: 24px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 12px 0 16px;
+}
