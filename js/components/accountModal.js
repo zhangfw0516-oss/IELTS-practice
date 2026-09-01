@@ -153,28 +153,23 @@
             const body = document.getElementById('account-modal-body-content');
             if (!body) return;
 
-            // 1. 如果未配置 Firebase
-            if (!state.isConfigured) {
-                this.renderConfigTab(body, state);
-                return;
-            }
-
-            // 2. 如果已登录
             if (state.currentUser) {
                 this.renderProfileView(body, state);
                 return;
             }
 
-            // 3. 未登录（显示 登录 / 注册 / 配置 标签页）
             this.renderAuthTabs(body, state);
         },
 
         renderAuthTabs(container, state) {
+            if (currentTab !== 'login' && currentTab !== 'register') {
+                currentTab = 'login';
+            }
+
             container.innerHTML = `
                 <div class="account-tabs">
                     <button class="account-tab-btn ${currentTab === 'login' ? 'active' : ''}" data-tab="login">邮箱登录</button>
                     <button class="account-tab-btn ${currentTab === 'register' ? 'active' : ''}" data-tab="register">免费注册</button>
-                    <button class="account-tab-btn ${currentTab === 'config' ? 'active' : ''}" data-tab="config">⚙️ 服务配置</button>
                 </div>
 
                 ${state.errorMessage ? `
@@ -199,8 +194,6 @@
                 this.renderLoginForm(contentEl, state);
             } else if (currentTab === 'register') {
                 this.renderRegisterForm(contentEl, state);
-            } else if (currentTab === 'config') {
-                this.renderConfigForm(contentEl, state);
             }
         },
 
@@ -298,14 +291,8 @@
                         <button type="button" class="account-btn account-btn-primary" id="btn-sync-push" style="padding: 14px; font-size: 1rem;" ${state.status === 'syncing' ? 'disabled' : ''}>
                             ${state.status === 'syncing' ? '🔄 正在同步云端数据...' : '☁️ 立即同步（上传当前进度）'}
                         </button>
-                    </div>
-
-                    <div class="account-actions-grid">
-                        <button type="button" class="account-btn account-btn-secondary" id="btn-sync-pull" ${state.status === 'syncing' ? 'disabled' : ''}>
+                        <button type="button" class="account-btn account-btn-secondary" id="btn-sync-pull" style="padding: 11px;" ${state.status === 'syncing' ? 'disabled' : ''}>
                             ⬇️ 从云端还原数据
-                        </button>
-                        <button type="button" class="account-btn account-btn-secondary" id="btn-switch-config">
-                            ⚙️ 项目配置
                         </button>
                     </div>
 
@@ -351,82 +338,11 @@
                 });
             }
 
-            const switchConfigBtn = container.querySelector('#btn-switch-config');
-            if (switchConfigBtn) {
-                switchConfigBtn.addEventListener('click', () => {
-                    this.renderConfigTab(container, state);
-                });
-            }
-
             container.querySelector('#btn-account-logout').addEventListener('click', async () => {
                 await window.CloudSyncService.logout();
             });
         },
 
-        renderConfigTab(container, state) {
-            container.innerHTML = `
-                <div class="account-alert alert-info">
-                    <span>💡</span>
-                    <span>请配置 Google Firebase API 信息以启用多端数据同步（0 成本完全免费）。</span>
-                </div>
-                <div id="account-config-content"></div>
-            `;
-            this.renderConfigForm(container.querySelector('#account-config-content'), state);
-        },
-
-        renderConfigForm(container, state) {
-            const currentConfig = window.FirebaseConfigManager ? window.FirebaseConfigManager.getConfig() : null;
-            const currentConfigStr = currentConfig ? JSON.stringify(currentConfig, null, 2) : '';
-
-            container.innerHTML = `
-                <form id="firebase-config-form">
-                    <div class="account-form-group">
-                        <label class="account-form-label" for="firebase-config-input">
-                            Firebase 配置代码 / JSON
-                        </label>
-                        <textarea class="account-form-input" id="firebase-config-input" rows="6" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4;" placeholder="直接粘贴 Firebase 控制台中的 firebaseConfig 对象..." required>${currentConfigStr}</textarea>
-                    </div>
-                    <button type="submit" class="account-btn account-btn-primary">
-                        保存配置并连接云服务
-                    </button>
-                    ${currentConfig ? `
-                        <button type="button" class="account-btn account-btn-secondary" id="btn-clear-config" style="margin-top: 8px;">
-                            清空当前配置
-                        </button>
-                    ` : ''}
-                </form>
-                <div class="account-help-note" style="margin-top: 14px;">
-                    <strong>📖 30 秒获取免费配置：</strong><br/>
-                    1. 访问 <a href="https://console.firebase.google.com/" target="_blank" style="color: #2563eb;">Firebase 控制台</a> 创建免费项目。<br/>
-                    2. 启用 <code>Authentication</code>（电子邮件/密码）和 <code>Firestore Database</code>。<br/>
-                    3. 在项目设置中复制 Web 应用配置并粘贴到上方即可。
-                </div>
-            `;
-
-            const form = container.querySelector('#firebase-config-form');
-            form.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const raw = form.querySelector('#firebase-config-input').value.trim();
-                try {
-                    window.FirebaseConfigManager.saveConfig(raw);
-                    if (typeof window.showToast === 'function') {
-                        window.showToast('✅ Firebase 配置已成功保存！', 'success');
-                    }
-                    currentTab = 'login';
-                } catch (err) {
-                    alert('配置格式有误：' + err.message);
-                }
-            });
-
-            const clearBtn = container.querySelector('#btn-clear-config');
-            if (clearBtn) {
-                clearBtn.addEventListener('click', () => {
-                    if (confirm('确定要清空当前的 Firebase 配置吗？')) {
-                        window.FirebaseConfigManager.clearConfig();
-                    }
-                });
-            }
-        }
     };
 
     window.AccountModal = AccountModal;
