@@ -458,6 +458,12 @@
         MAX_INTRA_CYCLES: 12
     });
 
+    // 首次学习不是“看过两轮就掌握”。先经过两次当日/隔夜巩固，
+    // 再进入跨日艾宾浩斯节点；旧 SM-2 字段继续保留，保证历史数据兼容。
+    const LEARNING_STEPS_MINUTES = Object.freeze([10, 12 * 60]);
+    const REVIEW_STEPS_DAYS = Object.freeze([1, 3, 7, 14, 30]);
+    const LEECH_THRESHOLD = 4;
+
     // 三档起始难度因子
     const INITIAL_EASE_FACTORS = Object.freeze({
         easy: 2.8,    // 简单：高起始难度因子，间隔长
@@ -554,6 +560,20 @@
         return next;
     }
 
+    function addMinutes(minutes, referenceTime) {
+        const base = toDate(referenceTime, new Date());
+        return new Date(base.getTime() + Math.max(1, Number(minutes) || 1) * 60000);
+    }
+
+    function nearestReviewStep(intervalDays) {
+        const interval = Math.max(0, Number(intervalDays) || 0);
+        let best = 0;
+        REVIEW_STEPS_DAYS.forEach((days, index) => {
+            if (Math.abs(days - interval) < Math.abs(REVIEW_STEPS_DAYS[best] - interval)) best = index;
+        });
+        return best;
+    }
+
     /**
      * 归一化词条数据
      * @param {Object} word - 词条对象
@@ -582,12 +602,27 @@
             ? word.intraCycles
             : 0;
 
+        const inferredState = word.memoryState || (
+            word.familiar === true ? 'familiar'
+                : ((Number(word.repetitions) || 0) > 0 ? 'review' : (word.nextReview ? 'learning' : 'new'))
+        );
+        const reviewStep = Number.isInteger(word.reviewStep)
+            ? Math.max(0, Math.min(REVIEW_STEPS_DAYS.length - 1, word.reviewStep))
+            : nearestReviewStep(interval);
+
         return {
             ...word,
             easeFactor,
             interval,
             repetitions,
-            intraCycles
+            intraCycles,
+            memoryState: inferredState,
+            learningStep: Number.isInteger(word.learningStep) ? Math.max(0, Math.min(1, word.learningStep)) : 0,
+            reviewStep,
+            resumeReviewStep: Number.isInteger(word.resumeReviewStep) ? Math.max(0, word.resumeReviewStep) : reviewStep,
+            streak: Math.max(0, Number(word.streak) || 0),
+            lapses: Math.max(0, Number(word.lapses) || 0),
+            leech: word.leech === true
         };
     }
 
@@ -652,47 +687,103 @@
             return word;
         }
 
-        // 如果是新词（没有EF），设置起始难度因子
-        if (normalized.easeFactor === null) {
-            return setInitialEaseFactor(normalized, quality);
-        }
-
         const q = QUALITY_RATINGS[quality] !== undefined
             ? QUALITY_RATINGS[quality]
             : (quality === true || quality === 'correct' ? QUALITY_RATINGS.good : QUALITY_RATINGS.wrong);
 
         const reviewedAt = toDate(referenceTime, new Date()).toISOString();
+        const firstResult = normalized.easeFactor === null;
+        const currentEF = firstResult
+            ? (INITIAL_EASE_FACTORS[quality] || INITIAL_EASE_FACTORS.good)
+            : normalized.easeFactor;
+        const attempts = Math.max(0, Number(normalized.attemptCount) || 0) + 1;
 
-        // 质量评分 < 3 视为失败，重置进度
+        // 忘记：成熟词不抹掉全部历史，而是进入两步再学习；连续遗忘会进入顽固词列表。
         if (q < 3) {
+            const lapses = normalized.lapses + 1;
+            const resumeReviewStep = normalized.memoryState === 'review'
+                ? Math.max(0, normalized.reviewStep - 1)
+                : normalized.resumeReviewStep;
             return {
                 ...normalized,
                 easeFactor: Math.max(
                     SM2_CONSTANTS.MIN_EASE_FACTOR,
-                    normalized.easeFactor - 0.2
+                    currentEF - 0.2
                 ),
-                interval: SM2_CONSTANTS.INITIAL_INTERVAL_DAYS,
-                repetitions: 0,
-                intraCycles: 1, // 重新进入轮内循环
-                correctCount: 0,
+                interval: LEARNING_STEPS_MINUTES[0] / 1440,
+                repetitions: Math.max(0, normalized.repetitions - 1),
+                intraCycles: Math.min(SM2_CONSTANTS.MAX_INTRA_CYCLES, normalized.intraCycles + 1),
+                correctCount: Math.max(0, Number(normalized.correctCount) || 0),
+                memoryState: normalized.memoryState === 'new' ? 'learning' : 'relearning',
+                learningStep: 0,
+                resumeReviewStep,
+                streak: 0,
+                lapses,
+                leech: lapses >= LEECH_THRESHOLD,
+                attemptCount: attempts,
+                lastQuality: 'wrong',
                 lastReviewed: reviewedAt,
-                nextReview: calculateNextReview(SM2_CONSTANTS.INITIAL_INTERVAL_DAYS, reviewedAt).toISOString()
+                nextReview: addMinutes(LEARNING_STEPS_MINUTES[0], reviewedAt).toISOString()
             };
         }
 
-        // 质量评分 >= 3，更新难度因子和间隔
-        const newEF = calculateEaseFactor(normalized.easeFactor, q);
+        const newEF = calculateEaseFactor(currentEF, q);
         const newReps = normalized.repetitions + 1;
-        const newInterval = calculateInterval(newReps, normalized.interval, newEF);
-        const nextReviewDate = calculateNextReview(newInterval, reviewedAt);
+        const easy = quality === 'easy';
+        const hard = quality === 'hard';
+        let memoryState = normalized.memoryState;
+        let learningStep = normalized.learningStep;
+        let reviewStep = normalized.reviewStep;
+        let interval = normalized.interval;
+        let nextReviewDate;
+
+        if (hard) {
+            if (memoryState === 'review') {
+                interval = Math.max(1, Math.round((Number(normalized.interval) || REVIEW_STEPS_DAYS[reviewStep]) * 0.5));
+                nextReviewDate = calculateNextReview(interval, reviewedAt);
+            } else {
+                memoryState = memoryState === 'relearning' ? 'relearning' : 'learning';
+                learningStep = 0;
+                interval = LEARNING_STEPS_MINUTES[0] / 1440;
+                nextReviewDate = addMinutes(LEARNING_STEPS_MINUTES[0], reviewedAt);
+            }
+        } else if (memoryState === 'new') {
+            memoryState = 'learning';
+            learningStep = easy ? 1 : 0;
+            const minutes = LEARNING_STEPS_MINUTES[learningStep];
+            interval = minutes / 1440;
+            nextReviewDate = addMinutes(minutes, reviewedAt);
+        } else if (memoryState === 'learning' || memoryState === 'relearning') {
+            if (learningStep === 0 && !easy) {
+                learningStep = 1;
+                interval = LEARNING_STEPS_MINUTES[1] / 1440;
+                nextReviewDate = addMinutes(LEARNING_STEPS_MINUTES[1], reviewedAt);
+            } else {
+                const resume = memoryState === 'relearning' ? normalized.resumeReviewStep : 0;
+                reviewStep = Math.min(REVIEW_STEPS_DAYS.length - 1, resume + (easy ? 1 : 0));
+                memoryState = 'review';
+                interval = REVIEW_STEPS_DAYS[reviewStep];
+                nextReviewDate = calculateNextReview(interval, reviewedAt);
+            }
+        } else {
+            reviewStep = Math.min(REVIEW_STEPS_DAYS.length - 1, reviewStep + (easy ? 2 : 1));
+            interval = REVIEW_STEPS_DAYS[reviewStep];
+            nextReviewDate = calculateNextReview(interval, reviewedAt);
+        }
 
         return {
             ...normalized,
             easeFactor: newEF,
-            interval: newInterval,
+            interval,
             repetitions: newReps,
-            intraCycles: 0, // 完成学习，退出轮内循环
+            intraCycles: hard ? Math.min(SM2_CONSTANTS.MAX_INTRA_CYCLES, normalized.intraCycles + 1) : 0,
             correctCount: (normalized.correctCount || 0) + 1,
+            memoryState,
+            learningStep,
+            reviewStep,
+            streak: hard ? 0 : normalized.streak + 1,
+            attemptCount: attempts,
+            lastQuality: quality,
             lastReviewed: reviewedAt,
             nextReview: nextReviewDate.toISOString()
         };
@@ -780,6 +871,9 @@
     const api = Object.freeze({
         // SM-2 算法核心
         SM2_CONSTANTS,
+        LEARNING_STEPS_MINUTES,
+        REVIEW_STEPS_DAYS,
+        LEECH_THRESHOLD,
         QUALITY_RATINGS,
         INITIAL_EASE_FACTORS,
         INTRA_EF_ADJUSTMENTS,
@@ -1004,7 +1098,7 @@
             : null; // 新词没有EF
 
         const interval = typeof entry.interval === 'number' && Number.isFinite(entry.interval) && entry.interval >= 0
-            ? Math.floor(entry.interval)
+            ? entry.interval
             : 1;
 
         const repetitions = typeof entry.repetitions === 'number' && Number.isFinite(entry.repetitions) && entry.repetitions >= 0
@@ -1018,6 +1112,30 @@
 
         const correctCountValue = Number(entry.correctCount);
         const correctCount = Number.isFinite(correctCountValue) && correctCountValue >= 0 ? Math.floor(correctCountValue) : 0;
+        const memoryStates = new Set(['new', 'learning', 'relearning', 'review', 'familiar']);
+        const memoryState = memoryStates.has(entry.memoryState) ? entry.memoryState : null;
+        const learningStep = Number.isInteger(entry.learningStep)
+            ? Math.min(1, Math.max(0, entry.learningStep))
+            : null;
+        const reviewStep = Number.isInteger(entry.reviewStep)
+            ? Math.min(4, Math.max(0, entry.reviewStep))
+            : null;
+        const resumeReviewStep = Number.isInteger(entry.resumeReviewStep)
+            ? Math.min(4, Math.max(0, entry.resumeReviewStep))
+            : null;
+        const streak = Number.isFinite(Number(entry.streak)) && Number(entry.streak) >= 0
+            ? Math.floor(Number(entry.streak))
+            : null;
+        const lapses = Number.isFinite(Number(entry.lapses)) && Number(entry.lapses) >= 0
+            ? Math.floor(Number(entry.lapses))
+            : null;
+        const attemptCount = Number.isFinite(Number(entry.attemptCount)) && Number(entry.attemptCount) >= 0
+            ? Math.floor(Number(entry.attemptCount))
+            : null;
+        const qualities = new Set(['wrong', 'hard', 'good', 'easy']);
+        const lastQuality = qualities.has(entry.lastQuality) ? entry.lastQuality : null;
+        const learningFocuses = new Set(['recognition', 'spelling', 'balanced', 'output']);
+        const learningFocus = learningFocuses.has(entry.learningFocus) ? entry.learningFocus : null;
         const familiar = entry.familiar === true;
         const familiarAt = entry.familiarAt && !Number.isNaN(new Date(entry.familiarAt).getTime())
             ? new Date(entry.familiarAt).toISOString()
@@ -1068,6 +1186,16 @@
             record.familiar = true;
             record.familiarAt = familiarAt || updatedAt;
         }
+        if (memoryState) record.memoryState = memoryState;
+        if (learningStep !== null) record.learningStep = learningStep;
+        if (reviewStep !== null) record.reviewStep = reviewStep;
+        if (resumeReviewStep !== null) record.resumeReviewStep = resumeReviewStep;
+        if (streak !== null) record.streak = streak;
+        if (lapses !== null) record.lapses = lapses;
+        if (attemptCount !== null) record.attemptCount = attemptCount;
+        if (entry.leech === true) record.leech = true;
+        if (lastQuality) record.lastQuality = lastQuality;
+        if (learningFocus) record.learningFocus = learningFocus;
         [
             'userInput',
             'questionId',
@@ -2648,7 +2776,7 @@
 
 /* ===== js/components/vocabSessionView.js ===== */
 (function(window) {
-    const DEFAULT_BATCH_SIZE = 24;
+    const DEFAULT_BATCH_SIZE = 10;
     const KEY_BINDINGS = Object.freeze({
         Enter: 'submit',
         NumpadEnter: 'submit',
@@ -2923,6 +3051,7 @@
                 backlog: state.session.backlog,
                 batchTotal: state.session.batchTotal,
                 batchWords: state.session.batchWords,
+                batchGraduates: state.session.batchGraduates,
                 spellingIndex: state.session.spellingIndex,
                 spellingInput: state.session.spellingInput,
                 spellingHintChars: state.session.spellingHintChars,
@@ -2970,6 +3099,7 @@
         state.session.savedWordIds = [];
         state.session.countedWordIds = [];
         state.session.spellingWords = [];
+        state.session.batchGraduates = [];
         state.session.spellingIndex = 0;
         state.session.spellingAdvancing = false;
         state.session.finishing = false;
@@ -4084,7 +4214,7 @@
         return {
             totalWords: words.length,
             dueCount: due.length,
-            masteredCount: words.filter((word) => word.familiar === true || Number(word.correctCount) >= Number(config.masteryCount || 4)).length,
+            masteredCount: words.filter((word) => isMasteredWord(word, config)).length,
             dailyNew: Number(config.dailyNew) || 0,
             reviewLimit: Number(config.reviewLimit) || 0,
             newCandidateCount: newCandidates.filter((word) => word.familiar !== true).length
@@ -4294,10 +4424,11 @@
     }
 
     function getWordStatus(word, config) {
-        const masteredTarget = Number(config?.masteryCount || 4);
-        const correctCount = Number(word?.correctCount || 0);
         if (word?.familiar === true) {
             return { label: '熟词', tone: 'familiar' };
+        }
+        if (word?.leech === true) {
+            return { label: '顽固词', tone: 'leech' };
         }
         if (word?.nextReview) {
             const next = new Date(word.nextReview);
@@ -4305,16 +4436,33 @@
                 return { label: '待复习', tone: 'due' };
             }
         }
-        if (correctCount >= masteredTarget) {
+        if (isMasteredWord(word, config)) {
             return { label: '已掌握', tone: 'mastered' };
+        }
+        if (word?.memoryState === 'relearning') {
+            return { label: '重新巩固', tone: 'reviewing' };
+        }
+        if (word?.memoryState === 'learning') {
+            return { label: '当日巩固', tone: 'reviewing' };
         }
         if (word?.nextReview) {
             return { label: '学习中', tone: 'reviewing' };
         }
-        if (word?.lastReviewed || correctCount > 0) {
+        if (word?.lastReviewed || Number(word?.correctCount || 0) > 0) {
             return { label: '学习中', tone: 'reviewing' };
         }
         return { label: '未学习', tone: 'new' };
+    }
+
+    function isMasteredWord(word, config) {
+        if (word?.familiar === true) return true;
+        const target = Number(config?.masteryCount || 4);
+        if (word?.memoryState) {
+            return word.memoryState === 'review'
+                && Number(word.reviewStep || 0) >= 1
+                && Number(word.streak || 0) >= target;
+        }
+        return Number(word?.correctCount || 0) >= target;
     }
 
     function isLearnedWord(word) {
@@ -4344,7 +4492,7 @@
             if (learned) {
                 learnedCount += 1;
             }
-            if (word.familiar === true || Number(word.correctCount || 0) >= masteryTarget) {
+            if (isMasteredWord(word, { masteryCount: masteryTarget })) {
                 masteredCount += 1;
             }
             if (status.tone === 'due') {
@@ -4557,6 +4705,7 @@
         if (action === 'action-know') {
             const item = state.session.currentWordItem;
             if (item) {
+                recordRecognitionDifficulty('good');
                 item.passStage = 1;
                 interleaveWord(item);
             }
@@ -4595,8 +4744,7 @@
             recordRecognitionDifficulty('wrong');
             const item = state.session.currentWordItem;
             if (item) {
-                item.passStage = 0;
-                interleaveWord(item);
+                requeueFailedItem(item);
             }
             nextCard();
             return;
@@ -4604,8 +4752,7 @@
         if (action === 'action-detail-next') {
             const item = state.session.currentWordItem;
             if (item) {
-                item.passStage = 0;
-                interleaveWord(item);
+                requeueFailedItem(item);
             }
             nextCard();
             return;
@@ -4614,14 +4761,15 @@
         // 2. 第二关盲测动作
         if (action === 'action-p2-know') {
             const item = state.session.currentWordItem;
-            const w = normalizeWord(item?.word || state.session.currentWord);
-            if (item && w) {
-                item.passStage = 2;
-                const completed = getCompletedWords();
-                if (!completed.some(cw => (cw.id || cw.word) === (w.id || w.word))) {
-                    completed.push(w);
-                }
-            }
+            recordRecognitionDifficulty('good');
+            if (item) completeRecognitionItem(item);
+            nextCard();
+            return;
+        }
+        if (action === 'action-p2-easy') {
+            const item = state.session.currentWordItem;
+            recordRecognitionDifficulty('easy');
+            if (item) completeRecognitionItem(item);
             nextCard();
             return;
         }
@@ -4915,15 +5063,55 @@
         };
     }
 
-    function interleaveWord(item) {
+    function activeListFocus() {
+        const listId = state.store?.getActiveListId?.() || '';
+        if (listId === 'reading-highlights') return 'recognition';
+        if (listId.startsWith('spelling-errors-')) return 'spelling';
+        return 'balanced';
+    }
+
+    function wordLearningFocus(word) {
+        const explicit = String(word?.learningFocus || word?.studyMode || '').toLowerCase();
+        return ['recognition', 'spelling', 'balanced', 'output'].includes(explicit)
+            ? explicit
+            : activeListFocus();
+    }
+
+    function requiresSpelling(word) {
+        return wordLearningFocus(word) !== 'recognition';
+    }
+
+    function completeRecognitionItem(item) {
+        const word = normalizeWord(item?.word || state.session.currentWord);
+        if (!word) return;
+        item.passStage = 2;
+        const completed = getCompletedWords();
+        if (!completed.some(candidate => (candidate.id || candidate.word) === (word.id || word.word))) {
+            completed.push(word);
+        }
+    }
+
+    function requeueFailedItem(item) {
+        if (!item) return;
+        item.failures = Math.max(0, Number(item.failures) || 0) + 1;
+        item.passStage = 0;
+        if (item.failures >= 3) {
+            item.forcedReview = true;
+            completeRecognitionItem(item);
+            return;
+        }
+        interleaveWord(item, 5, 10);
+    }
+
+    function interleaveWord(item, minimumGap = 3, maximumGap = 6) {
         const q = state.session.activeQueue;
         if (!q || !q.length) {
             state.session.activeQueue = [item];
             return;
         }
-        // 智能穿插：插入到后续第 2~4 个位置，若队列较短则插入末尾
-        const minPos = Math.min(q.length, 2);
-        const maxPos = Math.min(q.length, 4);
+        // 延迟回忆：不要刚看答案就原样再问。队列短时放到末尾。
+        const minPos = Math.min(q.length, minimumGap);
+        const maxPos = Math.min(q.length, Math.max(minimumGap, maximumGap));
         const insertPos = Math.floor(Math.random() * (maxPos - minPos + 1)) + minPos;
         q.splice(insertPos, 0, item);
     }
@@ -4958,7 +5146,9 @@
         const id = state.session.currentWord?.id;
         if (!id) return;
         state.session.recognitionResults ||= {};
-        if (state.session.recognitionResults[id] !== 'wrong') state.session.recognitionResults[id] = quality;
+        const previous = state.session.recognitionResults[id];
+        if (previous === 'wrong' || (previous === 'hard' && quality !== 'wrong')) return;
+        state.session.recognitionResults[id] = quality;
         saveSessionCheckpoint();
     }
 
@@ -4970,8 +5160,9 @@
     function startBatchSpelling(words) {
         const session = state.session;
         session.stage = 'batch-spelling';
-        session.spellingWords = (Array.isArray(words) ? words : session.batchWords || [])
+        session.batchGraduates = (Array.isArray(words) ? words : session.batchWords || [])
             .map(w => normalizeWord(w)).filter(w => w && !w.familiar);
+        session.spellingWords = session.batchGraduates.filter(requiresSpelling);
         session.spellingIndex = 0;
         session.spellingInput = '';
         session.spellingHintChars = 0;
@@ -5075,19 +5266,20 @@
     }
 
     function batchWordQuality(word) {
-        const result = getSpellingResult(word);
+        const result = state.session.spellingResults?.[word.id] || null;
         const recognition = state.session.recognitionResults?.[word.id];
-        if (result.skipped || result.wrongAttempts > 0 || recognition === 'wrong') return 'wrong';
-        if (result.hintUsed || recognition === 'hard') return 'hard';
-        return 'good';
+        if (result?.skipped || result?.wrongAttempts > 0 || recognition === 'wrong') return 'wrong';
+        if (result?.hintUsed || recognition === 'hard') return 'hard';
+        return recognition === 'easy' ? 'easy' : 'good';
     }
 
     async function finishBatchSession() {
         const session = state.session;
         if (session.finishing || session.stage === 'batch-summary') return false;
-        const words = (session.spellingWords || []).map(normalizeWord).filter(w => w && !w.familiar);
+        const words = (session.batchGraduates || session.spellingWords || []).map(normalizeWord).filter(w => w && !w.familiar);
         // Never graduate a batch when an unanswered item remains (including a malformed checkpoint).
-        if (words.some(w => !getSpellingResult(w).answered)) return false;
+        const spellingWords = (session.spellingWords || []).map(normalizeWord).filter(Boolean);
+        if (spellingWords.some(w => !getSpellingResult(w).answered)) return false;
         session.finishing = true;
         session.stage = 'batch-saving';
         pauseVocabStudyTime();
@@ -5112,7 +5304,7 @@
                 saveSessionCheckpoint();
             }
             session.progress.completed = session.progress.total;
-            session.progress.correct = words.filter(w => batchWordQuality(w) === 'good').length;
+            session.progress.correct = words.filter(w => ['good', 'easy'].includes(batchWordQuality(w))).length;
             session.progress.near = words.filter(w => batchWordQuality(w) === 'hard').length;
             session.progress.wrong = words.filter(w => batchWordQuality(w) === 'wrong').length;
             session.stage = 'batch-summary';
@@ -5156,9 +5348,10 @@
         const rawBatch = (session.backlog || []).splice(0, batchLimit);
         const validWords = rawBatch.map(w => normalizeWord(w)).filter(Boolean);
 
-        session.activeQueue = validWords.map((w) => ({ word: w, passStage: 0 }));
+        session.activeQueue = validWords.map((w) => ({ word: w, passStage: 0, failures: 0 }));
         session.batchTotal = session.activeQueue.length;
         session.batchWords = validWords.map((w) => ({ ...w }));
+        session.batchGraduates = [];
         session.completedWords = [];
         session.currentWordItem = session.activeQueue.shift() || null;
         session.currentWord = session.currentWordItem?.word || null;
@@ -5211,10 +5404,10 @@
 
         const learned = words.filter((w) => isLearnedWord(w));
         if (scope === 'mastered') {
-            return learned.filter((w) => w.familiar === true || Number(w.correctCount || 0) >= masteryTarget);
+            return learned.filter((w) => isMasteredWord(w, { masteryCount: masteryTarget }));
         }
         if (scope === 'reviewing') {
-            return learned.filter((w) => !(w.familiar === true || Number(w.correctCount || 0) >= masteryTarget));
+            return learned.filter((w) => !isMasteredWord(w, { masteryCount: masteryTarget }));
         }
         return learned;
     }
@@ -6082,11 +6275,14 @@
             return;
         }
         if (session.stage === 'empty') {
+            const backlogNotice = session.emptyReason === 'review-backlog'
+                ? '到期复习已达到 50 个，系统暂停加入新词。先完成复习，旧词稳定后再继续学新词。'
+                : '词库已背完或今日无待复习词汇。';
             card.innerHTML = `
                 <div class="vocab-card vocab-card--empty">
                     <div class="vocab-card__illustration" aria-hidden="true">📭</div>
                     <h3 class="vocab-card__empty-title">暂无学习任务</h3>
-                    <p class="vocab-card__empty-text">词库已背完或今日无待复习词汇。</p>
+                    <p class="vocab-card__empty-text">${backlogNotice}</p>
                     <div class="vocab-card__actions vocab-card__actions--stack">
                         <button class="btn btn-primary" type="button" data-action="return-mode-dash">返回背单词大厅</button>
                     </div>
@@ -6163,18 +6359,21 @@
             if (isPhase2) {
                 // 第二关盲测
                 bodyContentHtml = `
-                    <div class="vocab-blind-banner">本词最后一关：请在无提示的情况下凭直觉判断</div>
+                    <div class="vocab-blind-banner">延迟回忆关：答案已隔开，请独立判断，不要凭刚才的短时记忆</div>
                     <div class="vocab-masked-strip" style="cursor: default;">
                         <span>最后一关盲测中（释义与例句已隐藏）</span>
                     </div>
                 `;
                 actionsHtml = `
-                    <div class="vocab-action-grid-2">
-                        <button type="button" class="vocab-flow-btn vocab-flow-btn--green" data-action="action-p2-know">
-                            <span>认识</span>
+                    <div class="vocab-action-grid-3">
+                        <button type="button" class="vocab-flow-btn vocab-flow-btn--green" data-action="action-p2-easy">
+                            <span>熟练 · 很快想起</span>
+                        </button>
+                        <button type="button" class="vocab-flow-btn vocab-flow-btn--yellow" data-action="action-p2-know">
+                            <span>会了 · 能想起</span>
                         </button>
                         <button type="button" class="vocab-flow-btn vocab-flow-btn--red" data-action="action-p2-unknown">
-                            <span>不认识</span>
+                            <span>忘了</span>
                         </button>
                     </div>
                 `;
@@ -6255,7 +6454,7 @@
                         ‹ 返回大厅
                     </button>
                     <div class="vocab-card__step">
-                        ${isPhase2 ? '本词最后一关 · 盲测' : '第一关 · 认知学习'} · 词 ${completedCount + 1} / ${totalCount}
+                        ${isPhase2 ? '第二关 · 延迟回忆' : '第一关 · 认知学习'} · 词 ${completedCount + 1} / ${totalCount}
                     </div>
                     <div style="display: flex; gap: 8px; justify-content: flex-end;">
                         <button class="vocab-card__familiar ${word.familiar ? 'is-familiar' : ''}" type="button" data-action="mark-familiar" title="已经完全掌握，直接通关并标熟">
@@ -6268,7 +6467,7 @@
                 <div class="vocab-twopass-wordline">
                     <div class="vocab-twopass-word-row">
                         <h2 class="vocab-twopass-word">${safeWord}</h2>
-                        <span class="vocab-phase-dots" title="通关进度：需通过两关">
+                        <span class="vocab-phase-dots" title="首次学习两关；完成后仍会按艾宾浩斯复习">
                             <span class="vocab-phase-dot ${dot1}"></span>
                             <span class="vocab-phase-dot ${dot2}"></span>
                         </span>
@@ -6303,6 +6502,7 @@
         }
 
         const safeMeaning = escapeHtml(currentWord.meaning || '暂无释义');
+        const spellingFocused = wordLearningFocus(currentWord) === 'spelling';
 
         card.innerHTML = `
             <div class="vocab-card vocab-card--spelling">
@@ -6313,7 +6513,8 @@
                 </div>
 
                 <div class="vocab-batch-spell-box">
-                    <div style="font-size: 0.95rem; color: #64748b; font-weight: 600;">根据中文释义拼写英文单词：</div>
+                    <div style="font-size: 0.95rem; color: #64748b; font-weight: 600;">${spellingFocused ? '先听英音，再拼写单词：' : '根据中文释义主动拼写英文单词：'}</div>
+                    ${spellingFocused ? '<button type="button" class="btn btn-soft" data-action="play-pronounce" style="margin: 10px auto; border-radius: 999px;">🔊 播放真人英音</button>' : ''}
                     <div class="vocab-batch-spell-def">${safeMeaning}</div>
 
                     <div>
@@ -6345,8 +6546,8 @@
         card.innerHTML = `
             <div class="vocab-card vocab-card--summary" style="text-align: center; padding: 36px 28px;">
                 <div style="font-size: 3rem; margin-bottom: 8px;">🎉</div>
-                <h2 style="font-size: 1.7rem; font-weight: 800; color: #0f172a; margin: 0 0 8px;">本组 ${words.length} 词全面通关！</h2>
-                <p style="color: #64748b; font-size: 0.98rem; margin-bottom: 24px;">你已完成两关穿插认知与集中拼写，已正式记入今日已学词库！</p>
+                <h2 style="font-size: 1.7rem; font-weight: 800; color: #0f172a; margin: 0 0 8px;">本组 ${words.length} 词完成首次学习</h2>
+                <p style="color: #64748b; font-size: 0.98rem; margin-bottom: 24px;">两关和必要的拼写已完成；这不是永久掌握，系统会从约 10 分钟后的巩固开始继续安排复习。</p>
 
                 <div style="max-height: 240px; overflow-y: auto; text-align: left; padding: 14px 18px; background: rgba(255, 255, 255, 0.8); border-radius: 14px; margin-bottom: 28px; border: 1px solid #e2e8f0;">
                     ${words.map((w, i) => `
@@ -6377,12 +6578,16 @@
         const dueAll = store.getDueWords(now);
         const dueSelection = preferNew ? [] : dueAll.slice(0, reviewLimit);
         const preferredNewLimit = clampNumber(Number(config.dailyNew ?? DEFAULT_BATCH_SIZE), 0, CONFIG_LIMITS.dailyNew.max) ?? DEFAULT_BATCH_SIZE;
-        const newLimit = preferNew ? preferredNewLimit : 0;
+        const adaptiveNewLimit = dueAll.length >= 50
+            ? 0
+            : (dueAll.length >= 20 ? Math.max(1, Math.floor(preferredNewLimit / 2)) : preferredNewLimit);
+        const newLimit = preferNew ? adaptiveNewLimit : 0;
         const newWords = newLimit > 0 ? store.getNewWords(newLimit) : [];
         state.session.backlog = dueSelection.concat(newWords).map((word) => ({ ...word }));
         state.session.dueTotal = dueSelection.length;
         state.session.newTotal = newWords.length;
         state.session.duePending = dueAll.length;
+        state.session.emptyReason = preferNew && dueAll.length >= 50 ? 'review-backlog' : null;
         if (!state.session.backlog.length) {
             state.session.stage = 'empty';
         } else {
@@ -6432,8 +6637,8 @@
         const config = typeof state.store.getConfig === 'function' ? state.store.getConfig() : {};
         const masteryTarget = Number(config.masteryCount || 4);
         const learned = allWords.filter((w) => isLearnedWord(w));
-        const mastered = learned.filter((w) => w.familiar === true || Number(w.correctCount || 0) >= masteryTarget);
-        const reviewing = learned.filter((w) => !(w.familiar === true || Number(w.correctCount || 0) >= masteryTarget));
+        const mastered = learned.filter((w) => isMasteredWord(w, { masteryCount: masteryTarget }));
+        const reviewing = learned.filter((w) => !isMasteredWord(w, { masteryCount: masteryTarget }));
 
         const allScopeEl = state.container?.querySelector('[data-scope-count="all"]');
         if (allScopeEl) allScopeEl.textContent = learned.length;
@@ -6516,7 +6721,12 @@
                 // 确保所有词汇和队列数据全部被 normalizeWord 彻底规范化！
                 if (state.session.currentWordItem) {
                     const nw = normalizeWord(state.session.currentWordItem.word || state.session.currentWordItem);
-                    state.session.currentWordItem = { word: nw, passStage: state.session.currentWordItem.passStage || 0 };
+                    state.session.currentWordItem = {
+                        word: nw,
+                        passStage: state.session.currentWordItem.passStage || 0,
+                        failures: Number(state.session.currentWordItem.failures) || 0,
+                        forcedReview: state.session.currentWordItem.forcedReview === true
+                    };
                     state.session.currentWord = nw;
                 } else if (state.session.currentWord) {
                     const nw = normalizeWord(state.session.currentWord);
@@ -6532,7 +6742,9 @@
                 if (Array.isArray(state.session.activeQueue)) {
                     state.session.activeQueue = state.session.activeQueue.map(item => ({
                         word: normalizeWord(item.word || item),
-                        passStage: Number(item.passStage) || 0
+                        passStage: Number(item.passStage) || 0,
+                        failures: Number(item.failures) || 0,
+                        forcedReview: item.forcedReview === true
                     })).filter(it => it.word && it.word.word);
                 }
 
@@ -6542,6 +6754,9 @@
 
                 if (Array.isArray(state.session.spellingWords)) {
                     state.session.spellingWords = state.session.spellingWords.map(w => normalizeWord(w)).filter(Boolean);
+                }
+                if (Array.isArray(state.session.batchGraduates)) {
+                    state.session.batchGraduates = state.session.batchGraduates.map(w => normalizeWord(w)).filter(Boolean);
                 }
 
                 if ((state.session.currentWord && state.session.currentWord.word) || state.session.stage === 'batch-spelling' || ['batch-summary', 'batch-save-error'].includes(state.session.stage)) {

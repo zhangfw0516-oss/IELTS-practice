@@ -49,6 +49,9 @@ function patchVocabSessionView(source) {
         skipBatchSpelling,
         finishBatchSession,
         batchWordQuality,
+        wordLearningFocus,
+        requiresSpelling,
+        requeueFailedItem,
         normalizeWord,
         startSelectedMode,
         loadSessionCheckpoint,
@@ -887,6 +890,55 @@ async function run() {
         assert.ok(!store.words[0].lastReviewed);
     });
 
+    await record('reading highlights skip spelling while listening errors require it', () => {
+        const reading = createMockStore([{ id: 'read', word: 'context' }], { activeListId: 'reading-highlights' });
+        hooks.setStore(reading);
+        assert.strictEqual(hooks.wordLearningFocus(reading.words[0]), 'recognition');
+        assert.strictEqual(hooks.requiresSpelling(reading.words[0]), false);
+        const listening = createMockStore([{ id: 'listen', word: 'accommodation' }], { activeListId: 'spelling-errors-p1' });
+        hooks.setStore(listening);
+        assert.strictEqual(hooks.wordLearningFocus(listening.words[0]), 'spelling');
+        assert.strictEqual(hooks.requiresSpelling(listening.words[0]), true);
+    });
+
+    await record('recognition-only batch saves without an artificial spelling gate', async () => {
+        hooks.resetSessionState();
+        const store = createMockStore([{ id: 'read-save', word: 'ecosystem' }], { activeListId: 'reading-highlights' });
+        hooks.setStore(store);
+        hooks.state.session.recognitionResults['read-save'] = 'good';
+        hooks.startBatchSpelling(store.words);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        assert.strictEqual(hooks.state.session.spellingWords.length, 0);
+        assert.strictEqual(hooks.state.session.stage, 'batch-summary');
+        assert.ok(store.words[0].nextReview);
+    });
+
+    await record('three failed recalls stop same-session looping and mark the word wrong', () => {
+        hooks.resetSessionState();
+        const item = { word: { id: 'leech-today', word: 'obscure' }, passStage: 0, failures: 0 };
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            hooks.state.session.activeQueue = [];
+            hooks.requeueFailedItem(item);
+        }
+        assert.strictEqual(item.forcedReview, true);
+        assert.strictEqual(item.passStage, 2);
+        assert.strictEqual(hooks.state.session.completedWords.length, 1);
+    });
+
+    await record('easy delayed recall schedules the longer first reinforcement step', async () => {
+        hooks.resetSessionState();
+        const store = createMockStore([{ id: 'easy-new', word: 'obvious' }]);
+        hooks.setStore(store);
+        hooks.startBatchSpelling(store.words);
+        hooks.state.session.recognitionResults['easy-new'] = 'easy';
+        hooks.state.session.spellingResults['easy-new'] = { answered: true, wrongAttempts: 0, hintUsed: false, skipped: false };
+        assert.strictEqual(await hooks.finishBatchSession(), true);
+        assert.strictEqual(store.words[0].memoryState, 'learning');
+        assert.strictEqual(store.words[0].learningStep, 1);
+        const delayMinutes = Math.round((new Date(store.words[0].nextReview) - new Date(store.words[0].lastReviewed)) / 60000);
+        assert.strictEqual(delayMinutes, 720);
+    });
+
     await record('batch spelling correct answer persists only once after awaited save', async () => {
         const store = createMockStore([{ id: 'w-1', word: 'alpha', easeFactor: 2.3, interval: 3, repetitions: 2 }]);
         const recorded = [];
@@ -924,7 +976,8 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 650));
         assert.strictEqual(hooks.state.session.stage, 'batch-summary');
         assert.strictEqual(store.words[0].correctCount, 0);
-        assert.strictEqual(store.words[0].repetitions, 0);
+        assert.strictEqual(store.words[0].repetitions, 1);
+        assert.strictEqual(store.words[0].memoryState, 'relearning');
         assert.strictEqual(hooks.state.session.progress.wrong, 1);
     });
 
@@ -939,7 +992,8 @@ async function run() {
         assert.strictEqual(hooks.state.session.stage, 'batch-summary');
         assert.strictEqual(hooks.state.session.spellingIndex, 1);
         assert.strictEqual(store.words[0].correctCount, 0);
-        assert.strictEqual(store.words[0].repetitions, 0);
+        assert.strictEqual(store.words[0].repetitions, 1);
+        assert.strictEqual(store.words[0].memoryState, 'relearning');
         assert.strictEqual(hooks.state.session.progress.wrong, 1);
     });
 
@@ -1232,7 +1286,7 @@ async function run() {
         });
 
         assert.strictEqual(store.setConfigCalls, 1);
-        assert.strictEqual(hooks.state.session.batchSize, 24);
+        assert.strictEqual(hooks.state.session.batchSize, 10);
         assert.strictEqual(elements.settingsModal.dataset.open, 'false');
     });
 
@@ -1694,6 +1748,25 @@ async function run() {
         store.config.dailyNew = 1;
         hooks.prepareSessionQueue({ preferNew: true });
         assert.deepStrictEqual(Array.from(hooks.state.session.backlog, w => w.id), ['new-quota']);
+    });
+
+    await record('new-word quota shrinks with review backlog and pauses at fifty due words', () => {
+        const due = Array.from({ length: 20 }, (_, index) => ({
+            id: `due-${index}`, word: `due${index}`, lastReviewed: new Date(0).toISOString(), nextReview: new Date(0).toISOString()
+        }));
+        const fresh = Array.from({ length: 20 }, (_, index) => ({ id: `fresh-${index}`, word: `fresh${index}` }));
+        const store = createMockStore(due.concat(fresh), { dailyNew: 20, reviewLimit: 100 });
+        hooks.setStore(store);
+        hooks.resetSessionState();
+        hooks.prepareSessionQueue({ preferNew: true });
+        assert.strictEqual(hooks.state.session.backlog.length, 10);
+
+        store.words = Array.from({ length: 50 }, (_, index) => ({
+            id: `overdue-${index}`, word: `overdue${index}`, lastReviewed: new Date(0).toISOString(), nextReview: new Date(0).toISOString()
+        })).concat(fresh);
+        hooks.prepareSessionQueue({ preferNew: true });
+        assert.strictEqual(hooks.state.session.backlog.length, 0);
+        assert.strictEqual(hooks.state.session.emptyReason, 'review-backlog');
     });
 
     await record('hint-only spelling is hard not good and survives checkpoint roundtrip', () => {

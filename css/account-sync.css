@@ -1288,3 +1288,16 @@
     font-weight: 600;
     margin: 12px 0 16px;
 }
+
+@media (max-width: 640px) {
+    .vocab-action-grid-3 {
+        grid-template-columns: 1fr;
+        gap: 9px;
+    }
+
+    .vocab-flow-btn {
+        min-height: 46px;
+        padding: 11px 14px;
+        font-size: 1rem;
+    }
+}

@@ -11,11 +11,11 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             type="image/svg+xml"
             href="assets/images/favicon.svg"
         />
-        <link rel="stylesheet" href="css/main.css" />
+        <link rel="stylesheet" href="css/main.css?v=20260904_1" />
         <link rel="stylesheet" href="css/heroui-bridge.css" />
         <link rel="stylesheet" href="css/theme-switcher-scroll.css" />
         <link rel="stylesheet" href="css/onboarding.css" />
-        <link rel="stylesheet" href="css/account-sync.css?v=20260902_2" />
+        <link rel="stylesheet" href="css/account-sync.css?v=20260904_1" />
     </head>
 
     <body class="hero-body boot-active" data-theme="heroui">
@@ -992,7 +992,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                         <div class="tool-card-icon">🧠</div>
                         <div class="tool-card-content">
                             <h3>单词背诵</h3>
-                            <p>SM-2记忆算法，随时继续你的词汇任务。</p>
+                            <p>自适应艾宾浩斯复习，优先巩固快要忘的词。</p>
                         </div>
                         <div class="tool-card-arrow">进入</div>
                     </button>
@@ -1378,25 +1378,25 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
 
         <!-- 启动与懒加载工具 -->
         <script src="assets/vendor/three.min.js"></script>
-        <script src="js/bundles/runtime-entry.bundle.js?v=20260903_1"></script>
+        <script src="js/bundles/runtime-entry.bundle.js?v=20260904_1"></script>
 
         <!-- 基础环境与日志 -->
-        <script src="js/bundles/core-foundation.bundle.js?v=20260903_1"></script>
+        <script src="js/bundles/core-foundation.bundle.js?v=20260904_1"></script>
 
         <!-- 工具库与基础视图 -->
-        <script src="js/bundles/ui-shell.bundle.js?v=20260903_1"></script>
+        <script src="js/bundles/ui-shell.bundle.js?v=20260904_1"></script>
 
         <!-- 入口与懒加载代理 -->
-        <script src="js/bundles/legacy-app.bundle.js?v=20260903_1"></script>
+        <script src="js/bundles/legacy-app.bundle.js?v=20260904_1"></script>
 
         <!-- Firebase 与多端云同步系统 -->
         <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
         <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
         <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-        <script src="js/config/firebaseConfig.js?v=20260903_1"></script>
-        <script src="js/core/cloudSyncService.js?v=20260903_1"></script>
-        <script src="js/components/accountModal.js?v=20260903_1"></script>
-        <script src="js/services/studyStatsManager.js?v=20260903_1"></script>
+        <script src="js/config/firebaseConfig.js?v=20260904_1"></script>
+        <script src="js/core/cloudSyncService.js?v=20260904_1"></script>
+        <script src="js/components/accountModal.js?v=20260904_1"></script>
+        <script src="js/services/studyStatsManager.js?v=20260904_1"></script>
 
         <!-- 成就系统模态框 -->
         <div id="achievements-modal" class="theme-modal">

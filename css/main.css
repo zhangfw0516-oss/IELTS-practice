@@ -7802,6 +7802,11 @@ body.theme-blue ::-webkit-scrollbar-thumb {
     color: #a54841;
 }
 
+.vocab-list-status--leech {
+    background: rgba(126, 34, 206, 0.12);
+    color: #7e22ce;
+}
+
 .vocab-list-status--reviewing {
     background: rgba(196, 104, 75, 0.14);
     color: var(--vocab-accent-strong);

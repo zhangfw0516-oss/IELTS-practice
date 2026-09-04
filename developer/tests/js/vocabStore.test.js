@@ -1083,6 +1083,47 @@ async function testFamiliarWordsPersistAndLeaveStudyQueues() {
     assert.ok(vocabStore.getNewWords(10).some((word) => word.id === 'fresh-1'));
 }
 
+async function testAdaptiveReviewFieldsAndSubdayIntervalsPersist() {
+    const vocabStore = loadVocabStore({
+        embeddedWords: [],
+        dataSeed: {
+            words: [{ id: 'adaptive-1', word: 'adaptive', meaning: '自适应的' }]
+        }
+    });
+
+    await vocabStore.init();
+    const updated = await vocabStore.updateWord('adaptive-1', {
+        interval: 10 / (24 * 60),
+        memoryState: 'relearning',
+        learningStep: 1,
+        reviewStep: 3,
+        resumeReviewStep: 2,
+        streak: 7,
+        lapses: 4,
+        attemptCount: 12,
+        leech: true,
+        lastQuality: 'hard',
+        learningFocus: 'spelling'
+    });
+
+    assert.strictEqual(updated.interval, 10 / (24 * 60), '十分钟间隔不能被取整成零天');
+    assert.strictEqual(updated.memoryState, 'relearning');
+    assert.strictEqual(updated.learningStep, 1);
+    assert.strictEqual(updated.reviewStep, 3);
+    assert.strictEqual(updated.resumeReviewStep, 2);
+    assert.strictEqual(updated.streak, 7);
+    assert.strictEqual(updated.lapses, 4);
+    assert.strictEqual(updated.attemptCount, 12);
+    assert.strictEqual(updated.leech, true);
+    assert.strictEqual(updated.lastQuality, 'hard');
+    assert.strictEqual(updated.learningFocus, 'spelling');
+
+    const stored = vocabStore.__appDataState.words.find((word) => word.id === 'adaptive-1');
+    assert.strictEqual(stored.interval, 10 / (24 * 60));
+    assert.strictEqual(stored.memoryState, 'relearning');
+    assert.strictEqual(stored.leech, true);
+}
+
 async function main() {
     const results = [];
     try {
@@ -1120,6 +1161,8 @@ async function main() {
         results.push({ name: '外部词表提交会失效缓存并刷新激活词表', status: 'pass' });
         await testFamiliarWordsPersistAndLeaveStudyQueues();
         results.push({ name: '熟词标记持久化并退出学习队列', status: 'pass' });
+        await testAdaptiveReviewFieldsAndSubdayIntervalsPersist();
+        results.push({ name: '自适应复习字段和日内间隔可持久化', status: 'pass' });
         console.log(JSON.stringify({
             status: 'pass',
             detail: `${results.length}/${results.length} 测试通过`,

@@ -192,7 +192,7 @@
             : null; // 新词没有EF
         
         const interval = typeof entry.interval === 'number' && Number.isFinite(entry.interval) && entry.interval >= 0
-            ? Math.floor(entry.interval)
+            ? entry.interval
             : 1;
         
         const repetitions = typeof entry.repetitions === 'number' && Number.isFinite(entry.repetitions) && entry.repetitions >= 0
@@ -206,6 +206,30 @@
 
         const correctCountValue = Number(entry.correctCount);
         const correctCount = Number.isFinite(correctCountValue) && correctCountValue >= 0 ? Math.floor(correctCountValue) : 0;
+        const memoryStates = new Set(['new', 'learning', 'relearning', 'review', 'familiar']);
+        const memoryState = memoryStates.has(entry.memoryState) ? entry.memoryState : null;
+        const learningStep = Number.isInteger(entry.learningStep)
+            ? Math.min(1, Math.max(0, entry.learningStep))
+            : null;
+        const reviewStep = Number.isInteger(entry.reviewStep)
+            ? Math.min(4, Math.max(0, entry.reviewStep))
+            : null;
+        const resumeReviewStep = Number.isInteger(entry.resumeReviewStep)
+            ? Math.min(4, Math.max(0, entry.resumeReviewStep))
+            : null;
+        const streak = Number.isFinite(Number(entry.streak)) && Number(entry.streak) >= 0
+            ? Math.floor(Number(entry.streak))
+            : null;
+        const lapses = Number.isFinite(Number(entry.lapses)) && Number(entry.lapses) >= 0
+            ? Math.floor(Number(entry.lapses))
+            : null;
+        const attemptCount = Number.isFinite(Number(entry.attemptCount)) && Number(entry.attemptCount) >= 0
+            ? Math.floor(Number(entry.attemptCount))
+            : null;
+        const qualities = new Set(['wrong', 'hard', 'good', 'easy']);
+        const lastQuality = qualities.has(entry.lastQuality) ? entry.lastQuality : null;
+        const learningFocuses = new Set(['recognition', 'spelling', 'balanced', 'output']);
+        const learningFocus = learningFocuses.has(entry.learningFocus) ? entry.learningFocus : null;
         const familiar = entry.familiar === true;
         const familiarAt = entry.familiarAt && !Number.isNaN(new Date(entry.familiarAt).getTime())
             ? new Date(entry.familiarAt).toISOString()
@@ -256,6 +280,16 @@
             record.familiar = true;
             record.familiarAt = familiarAt || updatedAt;
         }
+        if (memoryState) record.memoryState = memoryState;
+        if (learningStep !== null) record.learningStep = learningStep;
+        if (reviewStep !== null) record.reviewStep = reviewStep;
+        if (resumeReviewStep !== null) record.resumeReviewStep = resumeReviewStep;
+        if (streak !== null) record.streak = streak;
+        if (lapses !== null) record.lapses = lapses;
+        if (attemptCount !== null) record.attemptCount = attemptCount;
+        if (entry.leech === true) record.leech = true;
+        if (lastQuality) record.lastQuality = lastQuality;
+        if (learningFocus) record.learningFocus = learningFocus;
         [
             'userInput',
             'questionId',
