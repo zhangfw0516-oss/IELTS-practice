@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from browser_launch import chromium_launch_options
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INDEX_URL = (REPO_ROOT / "index.html").as_uri()
 TARGET_EXAMS = ["p1-low-67", "p2-low-148", "p3-high-32"]
@@ -264,7 +266,11 @@ async def dismiss_license_modal_if_present(page) -> None:
 
 async def run() -> Dict[str, Any]:
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True, args=["--allow-file-access-from-files"])
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
+        )
         context = await browser.new_context(user_agent=UA)
         await context.add_init_script(script="window.__IELTS_READING_PAGE_TEST_HOOKS__ = true;")
 

@@ -75,8 +75,38 @@ assert.strictEqual(
     '缺失 manifest 应稳定记录为不可用，而不是反复回到 pending'
 );
 
+async function checkAssetVersion({ search = '', entryVersion = '', file = 'js/bundles/more.bundle.js' }, expectedVersion) {
+    const requests = [];
+    const doc = {
+        ...documentStub,
+        currentScript: entryVersion ? { src: `https://example.test/app/js/bundles/runtime-entry.bundle.js?v=${entryVersion}` } : null,
+        head: {
+            appendChild(script) {
+                requests.push(script.src);
+                queueMicrotask(() => script.onload?.());
+                return script;
+            }
+        }
+    };
+    const win = {
+        document: doc, console: quietConsole,
+        location: { origin: 'https://example.test', search, href: `https://example.test/app/index.html${search}` }
+    };
+    vm.runInContext(source, vm.createContext({ ...sandbox, window: win, globalThis: win, document: doc }));
+    win.AppLazyLoader.registerGroup('version-test', [file]);
+    await win.AppLazyLoader.ensureGroup('version-test');
+    assert.strictEqual(requests.length, 1);
+    assert.strictEqual(new URL(requests[0], doc.baseURI).searchParams.get('v'), expectedVersion);
+}
+
+await checkAssetVersion({ entryVersion: 'release-20260903' }, 'release-20260903');
+await checkAssetVersion({ search: '?v=explicit-preview', entryVersion: 'release-20260903' }, 'explicit-preview');
+await checkAssetVersion({ search: '?v=explicit-preview' }, 'explicit-preview');
+await checkAssetVersion({}, null);
+await checkAssetVersion({ entryVersion: 'release-20260903', file: 'https://cdn.example.test/external.js?v=vendor-version' }, 'vendor-version');
+
 console.log(JSON.stringify({
     status: 'pass',
-    detail: 'optional listening manifest failure is cached',
+    detail: 'optional listening failure is cached; 5 asset version fallback/precedence checks pass',
     manifestRequests: manifestRequests.length
 }, null, 2));

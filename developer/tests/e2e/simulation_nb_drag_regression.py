@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from browser_launch import chromium_launch_options
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 UNIFIED_READING_PATH = REPO_ROOT / "assets" / "generated" / "reading-exams" / "reading-practice-unified.html"
 GENERATED_READING_DIR = REPO_ROOT / "assets" / "generated" / "reading-exams"
@@ -285,6 +287,7 @@ async def main() -> int:
         browser = await playwright.chromium.launch(
             headless=True,
             args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
         )
         context = await browser.new_context()
         try:

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from browser_launch import chromium_launch_options
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INDEX_PATH = REPO_ROOT / "index.html"
@@ -808,10 +809,11 @@ async def _launch_browser(playwright_obj) -> Browser:
         return await playwright_obj.chromium.launch(
             headless=True,
             args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         log_step(f"Chromium 参数启动失败，回退默认参数: {exc}", "WARNING")
-        return await playwright_obj.chromium.launch(headless=True)
+        return await playwright_obj.chromium.launch(headless=True, **chromium_launch_options())
 
 
 def _ui_exam_ids(entries: Sequence[Dict[str, Any]], mode: str) -> List[str]:

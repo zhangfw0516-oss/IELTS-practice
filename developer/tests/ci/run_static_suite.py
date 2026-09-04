@@ -196,12 +196,13 @@ def _check_index_css_convergence(index_path: Path) -> Tuple[bool, dict]:
     except Exception as exc:  # pragma: no cover - defensive guard
         return False, {"error": f"读取失败：{exc}"}
 
-    css_hrefs = _extract_css_hrefs_from_html(source)
+    css_hrefs = [href.split("?", 1)[0] for href in _extract_css_hrefs_from_html(source)]
     allowed = {
         "css/main.css",
         "css/heroui-bridge.css",
         "css/theme-switcher-scroll.css",
         "css/onboarding.css",
+        "css/account-sync.css",
     }
     unexpected = sorted([href for href in css_hrefs if href not in allowed])
     missing_required = sorted([href for href in allowed if href not in css_hrefs])
@@ -357,9 +358,84 @@ def _check_v2_data_architecture() -> Tuple[bool, dict]:
         end = source.find(end_marker, start + len(start_marker))
         return end < 0 or offset < end
 
+    def in_named_case(source: str, offset: int, case_marker: str) -> bool:
+        """Match one test case body without granting the rest of the test file."""
+        return in_region(source, offset, case_marker, "\n    }],") or in_region(
+            source, offset, case_marker, "\n    });"
+        )
+
+    def is_cloud_reset_fixture_access(source: str, offset: int) -> bool:
+        if not source[:offset].endswith("h."):
+            return False
+        if not re.match(r"window\.(?:sessionStorage|indexedDB)\s*=", source[offset:]):
+            return False
+        return any(
+            in_named_case(source, offset, marker)
+            for marker in (
+                "['全量重置数据库删除失败时不能解锁旧账号残留数据'",
+                "['全量重置成功后确实删除账号归属键'",
+            )
+        )
+
+    def is_cloud_reset_backup_fixture_access(source: str, offset: int) -> bool:
+        return (
+            source[:offset].endswith("h.")
+            and source.startswith("window.ExternalBackupService", offset)
+            and any(
+                in_named_case(source, offset, marker)
+                for marker in (
+                    "['全量重置数据库删除失败时不能解锁旧账号残留数据'",
+                    "['全量重置成功后确实删除账号归属键'",
+                )
+            )
+        )
+
+    def is_vocab_checkpoint_fixture_access(source: str, offset: int) -> bool:
+        if not source[:offset].endswith("windowStub."):
+            return False
+        access = source[offset:]
+        if re.match(
+            r"localStorage\.(?:getItem|setItem)\('ielts_vocab_session_checkpoint'\s*[,)]",
+            access,
+        ):
+            return True
+        case_marker = "await record('unchanged checkpoint keeps its timestamp and remote updates invalidate stale queues'"
+        if not in_named_case(source, offset, case_marker):
+            return False
+        case_start = source.rfind(case_marker, 0, offset + 1)
+        key_is_bound = bool(re.search(
+            r"\bconst\s+key\s*=\s*'ielts_vocab_session_checkpoint'\s*;",
+            source[case_start:offset],
+        ))
+        return key_is_bound and bool(re.match(r"localStorage\.(?:getItem|setItem)\(key\s*[,)]", access))
+
     def is_allowed(relative: str, label: str, match: re.Match[str], line_text: str, source: str) -> bool:
         token = match.group(0)
         offset = match.start()
+        # TEMP compatibility boundary for the September 2026 account/vocab rollout.
+        # These synchronous config/stat/checkpoint keys predate their planned migration
+        # into the async AppData catalog. Do not exempt entire business modules: only
+        # named keys below may cross this boundary, and all other raw storage stays banned.
+        temporary_sync_keys = {
+            "js/config/firebaseConfig.js": ("STORAGE_KEY",),
+            "js/services/studyStatsManager.js": ("STORAGE_KEY", "DEVICE_KEY"),
+            "js/core/cloudSyncService.js": ("AUTO_KEY", "OWNER_KEY", "CHECKPOINT_KEY"),
+            "js/components/vocabSessionView.js": ("CHECKPOINT_STORAGE_KEY",),
+        }
+        if label == "raw-storage" and relative in temporary_sync_keys:
+            keys = "|".join(temporary_sync_keys[relative])
+            if re.match(rf"localStorage\.(?:getItem|setItem|removeItem)\(\s*(?:{keys})\s*[,)]", source[offset:]):
+                return True
+            if relative == "js/core/cloudSyncService.js" and re.match(
+                r"localStorage\.(?:getItem|setItem)\(LAST_SYNC_KEY \+ ':' \+ state\.projectId \+ ':' \+ (?:user\.)?uid\s*[,)]",
+                source[offset:],
+            ):
+                return True
+            if relative == "js/components/vocabSessionView.js" and re.match(
+                r"localStorage\.(?:getItem|setItem)\(\s*`vocab_immersive_pos_\$\{scope \|\| 'all'\}`",
+                source[offset:],
+            ):
+                return True
         if relative == "js/data/v2/dataKernel.js":
             if label == "raw-storage":
                 return True
@@ -414,6 +490,24 @@ def _check_v2_data_architecture() -> Tuple[bool, dict]:
             )
         if relative == "developer/tests/js/appDataV2.test.js" and label == "raw-storage":
             return True
+        if relative in {"developer/tests/js/cloudSyncService.test.js", "developer/tests/js/studyStatsManager.test.js"} and label == "raw-storage":
+            # These are in-memory VM fixture adapters for the temporary sync boundary,
+            # not business-layer access. Calls in actual test cases remain checked.
+            return in_region(source, offset, "function harness", "const cases =") or (
+                relative == "developer/tests/js/cloudSyncService.test.js"
+                and is_cloud_reset_fixture_access(source, offset)
+            )
+        if relative == "developer/tests/js/integration/vocabSessionView.test.js" and label == "raw-storage":
+            return in_region(source, offset, "function createVocabContext", "function createMoreViewContext") or (
+                # Inspect/seed only the legacy checkpoint in the in-memory window fixture.
+                is_vocab_checkpoint_fixture_access(source, offset)
+            )
+        if (
+            relative == "developer/tests/js/cloudSyncService.test.js"
+            and label == "old-global"
+            and is_cloud_reset_backup_fixture_access(source, offset)
+        ):
+            return True
         if relative == "developer/tests/js/dataLossBaseline.test.js" and label == "raw-storage":
             # This harness executes the real AppData/LegacyMigration boundary in a VM. Raw browser
             # storage is test-fixture infrastructure here; production and ordinary business tests
@@ -465,6 +559,97 @@ def _check_v2_data_architecture() -> Tuple[bool, dict]:
             return "console_errors" in line_text.lower() or "storagefacade" in line_text.lower()
         return False
 
+    # Keep the temporary exception narrow even when these modules evolve. These
+    # positive/negative cases run as part of the architecture gate itself.
+    compatibility_guard_cases = [
+        ("js/config/firebaseConfig.js", "localStorage.getItem(STORAGE_KEY)", True),
+        ("js/services/studyStatsManager.js", "localStorage.setItem(DEVICE_KEY, id)", True),
+        ("js/core/cloudSyncService.js", "localStorage.getItem(CHECKPOINT_KEY)", True),
+        ("js/core/cloudSyncService.js", "localStorage.getItem(LAST_SYNC_KEY + ':' + state.projectId + ':' + user.uid)", True),
+        ("js/components/vocabSessionView.js", "localStorage.setItem(CHECKPOINT_STORAGE_KEY, value)", True),
+        ("js/components/vocabSessionView.js", "localStorage.getItem(`vocab_immersive_pos_${scope || 'all'}`)", True),
+        ("js/config/firebaseConfig.js", "localStorage.getItem('unrelated-key')", False),
+        ("js/config/firebaseConfig.js", "localStorage.getItem(STORAGE_KEY + '-unrelated')", False),
+        ("js/services/studyStatsManager.js", "localStorage.clear()", False),
+        ("js/core/cloudSyncService.js", "localStorage.getItem(OTHER_KEY)", False),
+        ("js/components/vocabSessionView.js", "sessionStorage.setItem(CHECKPOINT_STORAGE_KEY, value)", False),
+        ("js/components/unrelated.js", "localStorage.getItem(STORAGE_KEY)", False),
+    ]
+    compatibility_guard_errors = []
+    for relative, example, expected in compatibility_guard_cases:
+        match = raw_storage_pattern.search(example)
+        if not match or is_allowed(relative, "raw-storage", match, example, example) is not expected:
+            compatibility_guard_errors.append(f"temporary-storage-guard:{relative}:{example}:expected={expected}")
+
+    # Exercise the test-only adapters too: positives cover the intended fixture
+    # syntax, while negatives prove the exception cannot leak to other cases or
+    # production modules.
+    test_fixture_guard_cases = [
+        (
+            "developer/tests/js/cloudSyncService.test.js",
+            "['全量重置成功后确实删除账号归属键', async () => {\n"
+            "        h.window.sessionStorage = { clear() {} };\n    }],",
+            True,
+        ),
+        (
+            "developer/tests/js/cloudSyncService.test.js",
+            "['普通同步测试', async () => {\n        h.window.sessionStorage = { clear() {} };\n    }],",
+            False,
+        ),
+        (
+            "js/core/cloudSyncService.js",
+            "['全量重置成功后确实删除账号归属键', async () => {\n"
+            "        h.window.sessionStorage = { clear() {} };\n    }],",
+            False,
+        ),
+        (
+            "developer/tests/js/integration/vocabSessionView.test.js",
+            "await record('unchanged checkpoint keeps its timestamp and remote updates invalidate stale queues', () => {\n"
+            "        const key = 'ielts_vocab_session_checkpoint';\n"
+            "        windowStub.localStorage.getItem(key);\n    });",
+            True,
+        ),
+        (
+            "developer/tests/js/integration/vocabSessionView.test.js",
+            "await record('unchanged checkpoint keeps its timestamp and remote updates invalidate stale queues', () => {\n"
+            "        const key = 'unrelated';\n        windowStub.localStorage.getItem(key);\n    });",
+            False,
+        ),
+        (
+            "js/components/vocabSessionView.js",
+            "await record('unchanged checkpoint keeps its timestamp and remote updates invalidate stale queues', () => {\n"
+            "        const key = 'ielts_vocab_session_checkpoint';\n"
+            "        windowStub.localStorage.getItem(key);\n    });",
+            False,
+        ),
+    ]
+    for relative, example, expected in test_fixture_guard_cases:
+        match = raw_storage_pattern.search(example)
+        line_start = example.rfind("\n", 0, match.start()) + 1 if match else 0
+        line_end = example.find("\n", match.start()) if match else -1
+        line_text = example[line_start:None if line_end < 0 else line_end]
+        if not match or is_allowed(relative, "raw-storage", match, line_text, example) is not expected:
+            compatibility_guard_errors.append(f"test-storage-guard:{relative}:expected={expected}")
+
+    backup_fixture_guard_cases = [
+        (
+            "developer/tests/js/cloudSyncService.test.js",
+            "['全量重置成功后确实删除账号归属键', async () => {\n"
+            "        h.window.ExternalBackupService = {};\n    }],",
+            True,
+        ),
+        (
+            "js/core/cloudSyncService.js",
+            "['全量重置成功后确实删除账号归属键', async () => {\n"
+            "        h.window.ExternalBackupService = {};\n    }],",
+            False,
+        ),
+    ]
+    for relative, example, expected in backup_fixture_guard_cases:
+        match = old_global_pattern.search(example)
+        if not match or is_allowed(relative, "old-global", match, example, example) is not expected:
+            compatibility_guard_errors.append(f"test-backup-guard:{relative}:expected={expected}")
+
     candidate_paths = set((REPO_ROOT / "js").rglob("*.js"))
     tests_root = REPO_ROOT / "developer" / "tests"
     candidate_paths.update(
@@ -480,7 +665,7 @@ def _check_v2_data_architecture() -> Tuple[bool, dict]:
     candidate_paths.discard(Path(__file__).resolve())
 
     bundle_marker_pattern = re.compile(r"/\* ===== ([^=]+?) ===== \*/")
-    source_errors: List[str] = []
+    source_errors: List[str] = compatibility_guard_errors
     test_state_errors: List[str] = []
     html_errors: List[str] = []
     seen_errors = set()
@@ -607,8 +792,13 @@ def _check_index_script_layout(index_path: Path) -> Tuple[bool, dict]:
         return False, {"error": f"读取失败：{exc}"}
 
     script_srcs = _extract_script_srcs_from_html(source)
+    # Cache-busting query strings do not change whether an entry is a source file
+    # or a generated bundle. Compare the asset paths while retaining the raw srcs
+    # for checks that intentionally care about the complete URL.
+    comparable_script_srcs = [src.split("?", 1)[0] for src in script_srcs]
     bundle_scripts = sorted({
-        src for src in script_srcs if src.startswith("js/bundles/") and src.endswith(".bundle.js")
+        src for src in comparable_script_srcs
+        if src.startswith("js/bundles/") and src.endswith(".bundle.js")
     })
     expected_bundle_scripts = sorted([
         "js/bundles/runtime-entry.bundle.js",
@@ -621,7 +811,7 @@ def _check_index_script_layout(index_path: Path) -> Tuple[bool, dict]:
         "js/app/main-entry.js",
         "js/app.js",
     ])
-    legacy_hits = sorted([src for src in script_srcs if src in legacy_entry_scripts])
+    legacy_hits = sorted([src for src in comparable_script_srcs if src in legacy_entry_scripts])
 
     mode = "bundle" if bundle_scripts else "source"
     if mode == "bundle":
@@ -636,7 +826,7 @@ def _check_index_script_layout(index_path: Path) -> Tuple[bool, dict]:
         return passed, detail
 
     required_legacy_scripts = ["js/main.js", "js/app.js"]
-    missing_legacy_scripts = sorted([src for src in required_legacy_scripts if src not in script_srcs])
+    missing_legacy_scripts = sorted([src for src in required_legacy_scripts if src not in comparable_script_srcs])
     passed = not missing_legacy_scripts
     detail = {
         "mode": mode,
@@ -2436,6 +2626,8 @@ def run_checks() -> Tuple[List[dict], bool]:
     v2_data_tests = [
         ("DataKernel v2 行为测试", REPO_ROOT / "developer" / "tests" / "js" / "dataKernelV2.test.js"),
         ("AppData v2 领域测试", REPO_ROOT / "developer" / "tests" / "js" / "appDataV2.test.js"),
+        ("云同步冲突与账号隔离回归测试", REPO_ROOT / "developer" / "tests" / "js" / "cloudSyncService.test.js"),
+        ("背词统计去重与跨设备合并回归测试", REPO_ROOT / "developer" / "tests" / "js" / "studyStatsManager.test.js"),
         ("v2 本地磁盘备份测试", REPO_ROOT / "developer" / "tests" / "js" / "externalBackupServiceV2.test.js"),
         ("站点全量重置测试", REPO_ROOT / "developer" / "tests" / "js" / "siteDataReset.test.js"),
         ("v2 数据丢失底线测试", REPO_ROOT / "developer" / "tests" / "js" / "dataLossBaseline.test.js"),

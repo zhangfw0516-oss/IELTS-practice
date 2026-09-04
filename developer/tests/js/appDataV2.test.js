@@ -468,11 +468,150 @@ async function testV2MergeImportPhoneticProtection() {
     assert.strictEqual(collections['unrelated-list'].words[0].phonetic, 'untouched-value');
 }
 
+async function testCloudMergePreservesNewerLocalProgress() {
+    const fixture = harness();
+    await fixture.app.ready;
+    const older = '2026-09-01T10:00:00.000Z';
+    const newer = '2026-09-02T10:00:00.000Z';
+    const latest = '2026-09-03T10:00:00.000Z';
+    const putDoc = (key, data, updatedAt) => {
+        const row = fixture.envelope(key, data);
+        row.updatedAt = updatedAt;
+        fixture.shared.docs.set(key, row);
+    };
+    putDoc('vocab.words', [
+        { id: 'local-only', word: 'local-only', updatedAt: older },
+        { id: 'local-newer', word: 'alpha', updatedAt: newer, status: 'familiar', phonetic: 'alpha-ipa' },
+        { id: 'cloud-newer', word: 'bravo', updatedAt: older, status: 'new', phonetic: 'bravo-ipa' },
+        { id: 'tied', word: 'charlie', updatedAt: newer, status: 'familiar' },
+        { id: 'reviewed', word: 'delta', updatedAt: older, lastReviewed: latest, status: 'review' },
+        { id: 'familiar', word: 'echo', updatedAt: older, familiarAt: latest, status: 'familiar' },
+        { id: 'local-spelling-id', word: 'Foxtrot', updatedAt: newer, status: 'familiar' },
+        { id: 'stable-local-id', word: 'Golf', updatedAt: older, status: 'new' }
+    ], newer);
+    putDoc('vocab.lists', {
+        custom: { id: 'custom', name: 'Local renamed list', updatedAt: newer, localMetadata: true, words: [
+            { id: 'list-local', word: 'local-list-word', updatedAt: older },
+            { id: 'list-shared', word: 'shared-list-word', updatedAt: newer, status: 'familiar' }
+        ] },
+        untouched: { id: 'untouched', name: 'Local only list', words: [] }
+    }, newer);
+    putDoc('settings.values', { localPreference: true, theme: 'local-theme' }, newer);
+    putDoc('preferences.values', { theme: 'local-tie-theme' }, newer);
+    putDoc('vocab.userConfig', { dailyNew: 7 }, older);
+
+    const incoming = { format: 'ielts-atlas-data-v2', schemaVersion: 2, scope: 'partial', envelopes: {}, entities: {} };
+    const incomingDoc = (key, data, updatedAt) => {
+        incoming.envelopes[key] = fixture.envelope(key, data);
+        incoming.envelopes[key].updatedAt = updatedAt;
+    };
+    incomingDoc('vocab.words', [
+        { id: 'cloud-only', word: 'cloud-only', updatedAt: older },
+        { id: 'local-newer', word: 'alpha', updatedAt: older, status: 'new' },
+        { id: 'cloud-newer', word: 'bravo', updatedAt: newer, status: 'review', phonetic: ' ' },
+        { id: 'tied', word: 'charlie', updatedAt: newer, status: 'new' },
+        { id: 'reviewed', word: 'delta', updatedAt: newer, status: 'new' },
+        { id: 'familiar', word: 'echo', updatedAt: newer, status: 'new' },
+        { id: 'cloud-spelling-id', word: ' foxtrot ', updatedAt: older, status: 'new' },
+        { id: 'different-cloud-id', word: ' golf ', updatedAt: newer, status: 'review' }
+    ], older);
+    incomingDoc('vocab.lists', {
+        custom: { id: 'custom', name: 'Old cloud name', updatedAt: older, words: [
+            { id: 'list-cloud', word: 'cloud-list-word', updatedAt: older },
+            { id: 'list-shared', word: 'shared-list-word', updatedAt: older, status: 'new' }
+        ] },
+        cloudList: { id: 'cloudList', name: 'Cloud only list', updatedAt: older, words: [] },
+        untimedCloudList: { id: 'untimedCloudList', name: 'Legacy untimed list', words: [] }
+    }, older);
+    incomingDoc('settings.values', { theme: 'cloud-old-theme' }, older);
+    incomingDoc('preferences.values', { theme: 'cloud-tie-theme' }, newer);
+    incomingDoc('vocab.userConfig', { dailyNew: 12 }, newer);
+    sealSnapshot(incoming);
+    const plan = await fixture.app.backups.previewImport(incoming, { practiceMode: 'merge', preferNewest: true });
+    await fixture.app.backups.commitImport(plan.id);
+
+    const words = await fixture.app.vocab.listWords();
+    const word = (id) => words.find((value) => value.id === id);
+    assert.strictEqual(words.length, 9, 'cloud merge must union new words, not replace local words or duplicate spelling aliases');
+    assert(word('local-only') && word('cloud-only'), 'both devices must retain their unique words');
+    assert.strictEqual(word('local-newer').status, 'familiar', 'old cloud state cannot unmark a newer familiar word');
+    assert.strictEqual(word('cloud-newer').status, 'review', 'newer cloud progress must be applied');
+    assert.strictEqual(word('cloud-newer').phonetic, 'bravo-ipa', 'a newer cloud word without IPA must preserve local IPA');
+    assert.strictEqual(word('tied').status, 'familiar', 'equal timestamps must retain local progress');
+    assert.strictEqual(word('reviewed').status, 'review', 'lastReviewed must count toward recency');
+    assert.strictEqual(word('familiar').status, 'familiar', 'familiarAt must count toward recency');
+    assert.strictEqual(word('local-spelling-id').status, 'familiar', 'normalized spelling must identify duplicates across generated IDs');
+    assert.strictEqual(word('stable-local-id').status, 'review', 'newer cloud progress matched by spelling must preserve stable local ID');
+    const lists = await fixture.app.vocab.listCollections();
+    assert(lists.untouched && lists.cloudList, 'list merge must retain lists unique to either device');
+    assert.strictEqual(lists.untimedCloudList.name, 'Legacy untimed list', 'a new untimed cloud list must retain its metadata');
+    assert.strictEqual(lists.custom.name, 'Local renamed list', 'older cloud metadata must not undo a local list rename');
+    assert.strictEqual(lists.custom.localMetadata, true);
+    assert.deepStrictEqual(lists.custom.words.map(value => value.id).sort(), ['list-cloud', 'list-local', 'list-shared']);
+    assert.strictEqual(lists.custom.words.find(value => value.id === 'list-shared').status, 'familiar');
+    assert.strictEqual((await fixture.app.settings.getAll()).theme, 'local-theme', 'older cloud preferences must be skipped');
+    assert.strictEqual((await fixture.app.preferences.getAll()).theme, 'local-tie-theme', 'tied cloud preferences must be skipped');
+    assert.strictEqual(fixture.shared.docs.get('vocab.userConfig').data.dailyNew, 12, 'newer cloud preferences should be applied');
+
+    const normal = await fixture.app.backups.previewImport(incoming, { practiceMode: 'merge' });
+    await fixture.app.backups.commitImport(normal.id);
+    assert.strictEqual((await fixture.app.vocab.listWords()).find(value => value.id === 'local-newer').status, 'new',
+        'ordinary user-requested file imports must retain incoming-overwrites behavior');
+    assert.strictEqual((await fixture.app.settings.getAll()).theme, 'cloud-old-theme');
+    assert.strictEqual((await fixture.app.vocab.listCollections()).custom.name, 'Old cloud name');
+}
+
+async function testCloudMergeSelectsPracticeLayersIndependently() {
+    const fixture = harness();
+    await fixture.app.ready;
+    const older = '2026-09-01T10:00:00.000Z';
+    const newer = '2026-09-02T10:00:00.000Z';
+    for (const id of ['shared', 'local-only']) {
+        await fixture.app.practice.completeAttempt({ record: {
+            id, examId: `reading-${id}`, type: 'reading', title: 'Local title',
+            totalQuestions: 1, correctAnswers: 1, answers: { 1: 'local-answer' }, notes: { q1: 'local-note' }
+        } });
+    }
+    for (const [store, rows] of fixture.shared.entities) {
+        rows.get('shared').updatedAt = store === 'practiceSummaries' ? older : newer;
+    }
+    const incoming = await fixture.app.backups.export({ domains: ['practice'] });
+    for (const [store, rows] of Object.entries(incoming.entities)) {
+        const shared = rows.find(value => value.recordId === 'shared');
+        shared.updatedAt = store === 'practiceAnnotations' ? older : newer;
+        if (store === 'practiceSummaries') shared.data.title = 'New cloud title';
+        if (store === 'practiceDetails') shared.data.answers = { 1: 'cloud-answer' };
+        if (store === 'practiceAnnotations') shared.data.notes = { q1: 'cloud-note' };
+        shared.checksum = checksum(shared.data);
+        const cloudOnly = clone(shared);
+        cloudOnly.recordId = 'cloud-only';
+        if (store === 'practiceSummaries') cloudOnly.data.id = 'cloud-only';
+        else cloudOnly.data.recordId = 'cloud-only';
+        cloudOnly.checksum = checksum(cloudOnly.data);
+        incoming.entities[store] = [shared, cloudOnly];
+    }
+    sealSnapshot(incoming);
+    const plan = await fixture.app.backups.previewImport(incoming, { practiceMode: 'merge', preferNewest: true });
+    await fixture.app.backups.commitImport(plan.id);
+    const record = await fixture.app.practice.get('shared');
+    assert.strictEqual(record.title, 'New cloud title', 'newer cloud summary must update');
+    assert.strictEqual(record.answers[1], 'local-answer', 'tied detail timestamp must keep local answers');
+    assert.strictEqual(record.notes.q1, 'local-note', 'older cloud annotations must not erase newer local notes');
+    assert(await fixture.app.practice.get('local-only'), 'merge must retain local-only practice records');
+    assert(await fixture.app.practice.get('cloud-only'), 'merge must add cloud-only practice records');
+    const normal = await fixture.app.backups.previewImport(incoming, { practiceMode: 'merge' });
+    await fixture.app.backups.commitImport(normal.id);
+    assert.strictEqual((await fixture.app.practice.get('shared')).notes.q1, 'cloud-note',
+        'ordinary imports must retain prior annotation overwrite semantics');
+}
+
 async function run() {
     await testVocabPhoneticMutationProtection();
     await testAtomicVocabPhoneticBackfill();
     await testReplaceProgressPhoneticProtection();
     await testV2MergeImportPhoneticProtection();
+    await testCloudMergePreservesNewerLocalProgress();
+    await testCloudMergeSelectsPracticeLayersIndependently();
     const { app, shared, envelope, sandbox } = harness(); await app.ready;
     const huge = 'x'.repeat(20000);
     const completed = await app.practice.completeAttempt({ operationId: 'complete', record: { id: 'r1', examId: 'reading-1', type: 'reading', title: 'Test', totalQuestions: 2, correctAnswers: 1, answers: { 1: 'A' }, answerMap: { 2: 'B' }, answerList: [{ questionId: '3', answer: 'C' }], correctAnswerMap: { 1: 'B' }, answerDetails: huge, scoreInfo: { band: 7 }, markedQuestions: ['q1'], highlights: [{ text: huge }], notes: { q1: huge }, interactions: [{ type: 'click' }], metadata: { examId: 'reading-1', examTitle: 'Reading 1', category: 'academic', frequency: 4, libraryConfigurationId: 'library-1', privatePayload: huge }, realData: { rawData: { token: huge }, answers: { 1: 'wrong', 4: 'D' }, answerMap: { 5: 'E' } }, rawData: { shouldNotPersist: huge, answers: { 6: 'F' }, answerMap: { 7: 'G' }, realData: { answers: { 8: 'H' } } } } });
@@ -1016,6 +1155,6 @@ async function run() {
     assert.strictEqual(await app.practice.get('legacy-1'), null);
     assert.strictEqual((await app.practice.get('snake-1')).answers[1], 'yes');
 
-    console.log(JSON.stringify({ status: 'pass', tests: 51 }));
+    console.log(JSON.stringify({ status: 'pass', tests: 53 }));
 }
 run().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });

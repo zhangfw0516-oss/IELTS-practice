@@ -3603,7 +3603,14 @@
         return logicalKey === 'vocab.words' ? identity.trim().toLowerCase() : identity;
     }
 
-    function mergeCollection(existing, incoming, logicalKey) {
+    function cloudValueTime(value) {
+        return Math.max(0, ...['updatedAt', 'lastReviewed', 'familiarAt', 'createdAt'].map(key => {
+            const raw = value && value[key];
+            return typeof raw === 'number' ? raw : (Date.parse(raw) || 0);
+        }));
+    }
+
+    function mergeCollection(existing, incoming, logicalKey, preferNewest = false) {
         const result = asArray(existing).map((item) => clone(item));
         const positions = new Map();
         result.forEach((item, index) => {
@@ -3614,11 +3621,20 @@
             const item = jsonValue(rawItem, `${logicalKey} item`);
             const identity = collectionIdentity(logicalKey, item);
             if (!identity) throw new AppDataError('VALIDATION', `${logicalKey} import item has no stable identity`);
-            const position = positions.get(identity);
+            let position = positions.get(identity);
+            if (preferNewest && logicalKey === 'vocab.words' && position === undefined && item.word) {
+                const wordKey = String(item.word).trim().toLowerCase();
+                const matched = result.findIndex(word => String(word.word || '').trim().toLowerCase() === wordKey);
+                if (matched >= 0) position = matched;
+            }
+            if (preferNewest && position !== undefined && cloudValueTime(result[position]) >= cloudValueTime(item)) continue;
             const mergedItem = logicalKey === 'vocab.words'
                 ? preserveProgressPhonetics([item], position === undefined ? [] : [result[position]])[0]
                 : item;
-            if (position !== undefined) result[position] = mergedItem;
+            if (position !== undefined) {
+                if (preferNewest && logicalKey === 'vocab.words' && result[position].id) mergedItem.id = result[position].id;
+                result[position] = mergedItem;
+            }
             else {
                 positions.set(identity, result.length);
                 result.push(mergedItem);
@@ -3627,13 +3643,24 @@
         return result;
     }
 
-    function mergeVocabListPhonetics(existing, incoming) {
+    function mergeVocabListPhonetics(existing, incoming, preferNewest = false) {
         const result = Object.assign({}, asObject(existing));
         Object.entries(asObject(incoming)).forEach(([listId, incomingValue]) => {
             const existingValue = result[listId];
             const existingWords = Array.isArray(existingValue)
                 ? existingValue
                 : asObject(existingValue).words;
+            if (preferNewest) {
+                const incomingWords = Array.isArray(incomingValue) ? incomingValue : asObject(incomingValue).words;
+                const words = mergeCollection(existingWords, incomingWords, 'vocab.words', true);
+                if (Array.isArray(existingValue) && Array.isArray(incomingValue)) result[listId] = words;
+                else {
+                    const metadata = existingValue !== undefined && cloudValueTime(existingValue) >= cloudValueTime(incomingValue)
+                        ? asObject(existingValue) : asObject(incomingValue);
+                    result[listId] = Object.assign({}, clone(metadata), { words });
+                }
+                return;
+            }
             if (Array.isArray(incomingValue)) {
                 result[listId] = preserveProgressPhonetics(incomingValue, existingWords);
                 return;
@@ -3651,12 +3678,12 @@
         return result;
     }
 
-    function mergeImportValue(entry, existing, incoming) {
+    function mergeImportValue(entry, existing, incoming, preferNewest = false) {
         const policy = entry.import;
-        if (policy === 'merge-by-id') return mergeCollection(existing, incoming, entry.logicalKey);
+        if (policy === 'merge-by-id') return mergeCollection(existing, incoming, entry.logicalKey, preferNewest);
         if (policy === 'patch') {
             if (entry.logicalKey === 'vocab.lists') {
-                return mergeVocabListPhonetics(existing, incoming);
+                return mergeVocabListPhonetics(existing, incoming, preferNewest);
             }
             if (Array.isArray(existing) || Array.isArray(incoming)) {
                 // Array-shaped keys should use merge-by-id; treat accidental patch as replace.
@@ -3707,9 +3734,13 @@
             }
             const current = await kernel.read(logicalKey, { withMeta: true });
             revisionToken.documents[logicalKey] = current.envelope ? Number(current.envelope.revision) || 0 : 0;
+            // Cloud synchronization is conservative. Ordinary file imports retain their existing semantics.
+            if (options.preferNewest === true && !replaceDocuments && entry.import !== 'merge-by-id'
+                && logicalKey !== 'vocab.lists' && current.envelope
+                && cloudValueTime(current.envelope) >= cloudValueTime(envelope)) continue;
             let next = envelope;
             if (!replaceDocuments && envelope.state === 'present') {
-                next = internals.makeEnvelope(entry, mergeImportValue(entry, current.data, envelope.data), { operationId: randomId('import-merge') });
+                next = internals.makeEnvelope(entry, mergeImportValue(entry, current.data, envelope.data, options.preferNewest === true), { operationId: randomId('import-merge') });
             }
             snapshot.envelopes[logicalKey] = next;
             keys.push(logicalKey);
@@ -3760,7 +3791,9 @@
                     if (index === undefined) {
                         positions.set(String(row.recordId), rows.length);
                         rows.push(clone(row));
-                    } else rows[index] = clone(row);
+                    } else if (options.preferNewest !== true || replacePractice || cloudValueTime(row) > cloudValueTime(rows[index])) {
+                        rows[index] = clone(row);
+                    }
                 }
                 snapshot.entities[store] = rows;
             }
@@ -6619,9 +6652,13 @@
             });
         }
 
-        try { errors.push(...clearWebStorage()); }
-        catch (error) {
-            errors.push({ stage: 'clear-web-storage', error });
+        // Keep local ownership and recovery keys when any database may still contain
+        // the previous user's records. Otherwise a second account could adopt them.
+        if (!errors.length) {
+            try { errors.push(...clearWebStorage()); }
+            catch (error) {
+                errors.push({ stage: 'clear-web-storage', error });
+            }
         }
 
         if (errors.length) {

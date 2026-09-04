@@ -9,6 +9,10 @@
     let overlayEl = null;
     let badgeEl = null;
 
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+    }
+
     function formatTimeAgo(timestamp) {
         if (!timestamp) return '尚未同步';
         const diff = Date.now() - timestamp;
@@ -166,7 +170,7 @@
                 ${state.errorMessage ? `
                     <div class="account-alert alert-error">
                         <span>⚠️</span>
-                        <span>${state.errorMessage}</span>
+                        <span>${escapeHtml(state.errorMessage)}</span>
                     </div>
                 ` : ''}
 
@@ -181,7 +185,7 @@
                         <label class="account-form-label" for="auth-password">
                             ${isRegister ? '设置密码' : '密码'}
                         </label>
-                        <input class="account-form-input" type="password" id="auth-password" placeholder="${isRegister ? '设置密码' : '请输入密码'}" required autocomplete="${isRegister ? 'new-password' : 'current-password'}" />
+                        <input class="account-form-input" type="password" id="auth-password" placeholder="${isRegister ? '至少 8 位密码' : '请输入密码（旧密码仍可用）'}" ${isRegister ? 'minlength="8"' : ''} required autocomplete="${isRegister ? 'new-password' : 'current-password'}" />
                     </div>
                     <button type="submit" class="account-btn account-btn-primary" style="padding: 12px; font-size: 1rem; margin-top: 4px;" ${state.status === 'syncing' ? 'disabled' : ''}>
                         ${state.status === 'syncing' ? '🔄 正在处理中...' : (isRegister ? '注 册 并 开 启 同 步' : '登 录')}
@@ -201,8 +205,9 @@
                 </div>
 
                 <div class="account-help-note" style="margin-top: 16px;">
-                    💡 登录后，背单词掌握度、错题本与做题记录将在电脑与手机端自动互通漫游。
+                    💡 推荐用真实邮箱注册，方便找回密码。昵称账号无法接收找回邮件。默认手动同步：换设备前请点击「立即同步」，或主动开启自动同步。
                 </div>
+                <button type="button" class="account-link-btn" id="btn-password-reset">使用注册邮箱找回密码</button>
             `;
 
             const form = container.querySelector('#account-auth-form');
@@ -229,6 +234,13 @@
                     this.renderModalBody(state);
                 });
             }
+            container.querySelector('#btn-password-reset')?.addEventListener('click', async () => {
+                const email = form.querySelector('#auth-username').value;
+                try {
+                    await window.CloudSyncService.sendPasswordReset(email);
+                    window.showToast?.('若该邮箱已注册，将收到密码重置邮件，请检查收件箱和垃圾邮件', 'info');
+                } catch (error) { window.showToast?.(error.message || '密码重置失败', 'error'); }
+            });
         },
 
         renderProfileView(container, state) {
@@ -239,9 +251,9 @@
             container.innerHTML = `
                 <div class="account-profile-card">
                     <div class="account-user-banner">
-                        <div class="account-avatar-circle">${initial}</div>
+                        <div class="account-avatar-circle">${escapeHtml(initial)}</div>
                         <div class="account-user-meta">
-                            <div class="account-user-email" title="${username}">${username}</div>
+                            <div class="account-user-email" title="${escapeHtml(username)}">${escapeHtml(username)}</div>
                             <div class="account-sync-subtext">
                                 <span>上次云端同步：</span>
                                 <strong>${formatTimeAgo(state.lastSyncTime)}</strong>
@@ -252,13 +264,13 @@
                     ${state.errorMessage ? `
                         <div class="account-alert alert-error">
                             <span>⚠️</span>
-                            <span>${state.errorMessage}</span>
+                            <span>${escapeHtml(state.errorMessage)}</span>
                         </div>
                     ` : ''}
 
                     <div class="account-actions-grid" style="grid-template-columns: 1fr;">
                         <button type="button" class="account-btn account-btn-primary" id="btn-sync-push" style="padding: 14px; font-size: 1rem;" ${state.status === 'syncing' ? 'disabled' : ''}>
-                            ${state.status === 'syncing' ? '🔄 正在同步云端数据...' : '☁️ 立即同步（上传当前进度）'}
+                            ${state.status === 'syncing' ? '🔄 正在同步云端数据...' : '☁️ 立即同步（合并并上传）'}
                         </button>
                         <button type="button" class="account-btn account-btn-secondary" id="btn-sync-pull" style="padding: 11px;" ${state.status === 'syncing' ? 'disabled' : ''}>
                             ⬇️ 从云端还原数据

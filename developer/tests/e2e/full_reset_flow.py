@@ -10,6 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from browser_launch import chromium_launch_options
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -28,7 +29,7 @@ def main() -> None:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(headless=True, **chromium_launch_options())
             context = browser.new_context()
             page = context.new_page()
             requested_urls: list[str] = []

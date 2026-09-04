@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const source = fs.readFileSync(path.join(root, 'js/core/siteDataReset.js'), 'utf8');
+const OWNER_KEY = 'ielts_atlas_local_data_owner';
+const OWNER_VALUE = 'test-project:account-owner';
 
 function createStorage(seed = {}, options = {}) {
     const values = new Map(Object.entries(seed));
@@ -30,7 +32,7 @@ function createHarness(options = {}) {
         Object.entries(options.deleteModeSequence || {}).map(([name, modes]) => [name, [...modes]])
     );
     const localStorage = createStorage(
-        { consent: 'yes' },
+        { consent: 'yes', [OWNER_KEY]: OWNER_VALUE },
         { clearError: options.localStorageClearError }
     );
     const sessionStorage = createStorage(
@@ -223,6 +225,8 @@ async function testSuccessfulReset() {
     assert.equal(harness.events[0], 'full-reset-lock:acquired');
     assert.ok(harness.events.indexOf('external:prepare') > 0);
     assert.equal(harness.localStorage.values.size, 0);
+    assert.equal(harness.localStorage.values.has(OWNER_KEY), false,
+        'a successful full reset must clear the local data owner');
     assert.equal(harness.sessionStorage.values.size, 0);
     assert.equal(harness.windowStub.location.reloadCalls, 1);
     assert.equal(result.externalBackupFilesPreserved, true);
@@ -298,7 +302,12 @@ async function testDeletionFailureIsVisible() {
     assert.equal(result.reason, 'partial_reset');
     assert.equal(result.terminal, false);
     assert.equal(harness.windowStub.location.reloadCalls, 0);
-    assert.equal(harness.localStorage.clearCalls, 1);
+    assert.equal(harness.localStorage.clearCalls, 0,
+        'a failed database deletion must preserve local storage ownership');
+    assert.equal(harness.sessionStorage.clearCalls, 0,
+        'a failed database deletion must preserve recovery state');
+    assert.equal(harness.localStorage.values.get(OWNER_KEY), OWNER_VALUE,
+        'a partial reset must not let another account adopt remaining database records');
     assert.ok(harness.messages.some((entry) => entry.type === 'error'));
 }
 
@@ -318,6 +327,11 @@ async function testSkippedDatabaseDeletionRollsBackPreparation() {
     assert.equal(harness.externalBackup.rollbackCalls, 1);
     assert.equal(harness.externalBackup.status.suspended, false);
     assert.equal(harness.externalBackup.status.bound, true);
+    assert.equal(harness.localStorage.clearCalls, 0,
+        'skipped database deletion must preserve local storage ownership');
+    assert.equal(harness.sessionStorage.clearCalls, 0,
+        'skipped database deletion must preserve recovery state');
+    assert.equal(harness.localStorage.values.get(OWNER_KEY), OWNER_VALUE);
 }
 
 async function testStorageClearFailureRollsBackPreparation() {

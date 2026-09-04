@@ -1,14 +1,16 @@
 (function(window) {
     const DEFAULT_BATCH_SIZE = 24;
-    const RETRY_DELAYS = Object.freeze({
-        wrong: 60 * 1000,
-        near: 10 * 60 * 1000,
-        correct: 24 * 60 * 60 * 1000
-    });
     const KEY_BINDINGS = Object.freeze({
         Enter: 'submit',
         NumpadEnter: 'submit',
         KeyF: 'reveal',
+        Digit1: 'know',
+        Digit2: 'hint',
+        Digit3: 'unknown',
+        KeyJ: 'know',
+        KeyK: 'unknown',
+        Space: 'hint',
+        KeyR: 'pronounce',
         Escape: 'escape'
     });
 
@@ -190,33 +192,79 @@
 
     const CHECKPOINT_STORAGE_KEY = 'ielts_vocab_session_checkpoint';
     let sessionActiveStartTime = null;
+    let lastCheckpointSignature = null;
 
-    function flushVocabStudyTime() {
-        if (sessionActiveStartTime) {
-            const elapsed = Math.round((Date.now() - sessionActiveStartTime) / 1000);
-            if (elapsed >= 2) {
-                if (window.StudyStatsManager) {
-                    window.StudyStatsManager.addVocabStudyDuration(elapsed);
-                    window.StudyStatsManager.render();
-                }
-            }
+    function isVocabViewVisible() {
+        const container = state.container;
+        return !!container && !container.hidden && container.style?.display !== 'none'
+            && (!container.classList?.contains('view') || container.classList.contains('active'))
+            && document.visibilityState !== 'hidden';
+    }
+
+    function hasToolModal() {
+        return !!document.querySelector('.vocab-tool-modal, .vocab-dict-drawer, .vocab-wordlist-shell, .account-modal-overlay.active');
+    }
+
+    function resumeVocabStudyTime() {
+        if (sessionActiveStartTime === null && state.ui.sessionVisible && isVocabViewVisible()
+            && !hasToolModal() && !isSettingsModalOpen() && !isListModalOpen()
+            && ['recognition', 'batch-spelling'].includes(state.session.stage)) {
             sessionActiveStartTime = Date.now();
+        }
+    }
+
+    function flushVocabStudyTime(pause = false) {
+        if (sessionActiveStartTime !== null) {
+            const elapsed = Math.max(0, Math.floor((Date.now() - sessionActiveStartTime) / 1000));
+            if (elapsed > 0 && window.StudyStatsManager) {
+                window.StudyStatsManager.addVocabStudyDuration(elapsed);
+                window.StudyStatsManager.render();
+            }
+            sessionActiveStartTime = pause ? null : sessionActiveStartTime + elapsed * 1000;
         }
         saveSessionCheckpoint();
     }
 
+    function pauseVocabStudyTime() {
+        flushVocabStudyTime(true);
+        stopActivePronunciation();
+    }
+
+    function updateStudyVisibility() {
+        if (!isVocabViewVisible()) {
+            pauseVocabStudyTime();
+        } else if (hasToolModal()) {
+            // Tool audio owns the player now; pause only the underlying session timer.
+            flushVocabStudyTime(true);
+        } else if (!state.ui.sessionVisible || isSettingsModalOpen() || isListModalOpen()
+            || !['recognition', 'batch-spelling'].includes(state.session.stage)) {
+            pauseVocabStudyTime();
+        } else {
+            resumeVocabStudyTime();
+        }
+    }
+
     function saveSessionCheckpoint() {
         try {
-            if (state.session.stage === 'complete' || state.session.stage === 'batch-summary' || state.session.stage === 'empty') {
-                localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
+            if (state.session.stage === 'complete' || state.session.stage === 'empty'
+                || (state.session.stage === 'batch-summary' && !state.session.backlog?.length)) {
+                clearSessionCheckpoint();
                 return;
             }
-            if (!state.session.currentWordItem && (!state.session.activeQueue || !state.session.activeQueue.length) && state.session.stage !== 'batch-spelling') {
+            if (!state.session.currentWordItem && (!state.session.activeQueue || !state.session.activeQueue.length)
+                && !['batch-spelling', 'batch-saving', 'batch-save-error', 'batch-summary'].includes(state.session.stage)) {
                 return;
             }
 
             const checkpoint = {
                 timestamp: Date.now(),
+                listId: state.session.listId || state.store?.getActiveListId?.() || 'default',
+                sessionId: state.session.sessionId,
+                subStage: state.session.subStage,
+                spellingResults: state.session.spellingResults,
+                recognitionResults: state.session.recognitionResults,
+                savedWordIds: state.session.savedWordIds,
+                countedWordIds: state.session.countedWordIds,
                 mode: state.session.currentMode || 'learn',
                 stage: state.session.stage,
                 currentWordItem: state.session.currentWordItem,
@@ -227,10 +275,15 @@
                 batchTotal: state.session.batchTotal,
                 batchWords: state.session.batchWords,
                 spellingIndex: state.session.spellingIndex,
+                spellingInput: state.session.spellingInput,
+                spellingHintChars: state.session.spellingHintChars,
                 spellingWords: state.session.spellingWords,
                 progress: state.session.progress
             };
+            const signature = JSON.stringify({ ...checkpoint, timestamp: 0 });
+            if (signature === lastCheckpointSignature) return;
             localStorage.setItem(CHECKPOINT_STORAGE_KEY, JSON.stringify(checkpoint));
+            lastCheckpointSignature = signature;
         } catch (e) {
             console.warn('[Vocab] Failed to save session checkpoint:', e);
         }
@@ -241,7 +294,7 @@
             const raw = localStorage.getItem(CHECKPOINT_STORAGE_KEY);
             if (raw) {
                 const cp = JSON.parse(raw);
-                if (cp && (cp.currentWord || (cp.activeQueue && cp.activeQueue.length))) {
+                if (cp && !cp.cleared && (cp.currentWord || cp.spellingWords?.length || (cp.activeQueue && cp.activeQueue.length))) {
                     return cp;
                 }
             }
@@ -251,12 +304,27 @@
 
     function clearSessionCheckpoint() {
         try {
-            localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
+            const previous = JSON.parse(localStorage.getItem(CHECKPOINT_STORAGE_KEY) || 'null');
+            if (!previous?.cleared) {
+                localStorage.setItem(CHECKPOINT_STORAGE_KEY, JSON.stringify({ timestamp: Date.now(), cleared: true }));
+            }
+            lastCheckpointSignature = null;
         } catch (_) {}
     }
 
     function resetSessionState() {
-        stopActivePronunciation();
+        pauseVocabStudyTime();
+        state.session.sessionId = null;
+        state.session.listId = null;
+        state.session.spellingResults = {};
+        state.session.recognitionResults = {};
+        state.session.savedWordIds = [];
+        state.session.countedWordIds = [];
+        state.session.spellingWords = [];
+        state.session.spellingIndex = 0;
+        state.session.spellingAdvancing = false;
+        state.session.finishing = false;
+        state.session.markingFamiliar = false;
         state.session.backlog = [];
         state.session.activeQueue = [];
         state.session.completedWords = [];
@@ -651,32 +719,6 @@
         state.elements.sidePanel.dataset.mobile = state.viewport.isMobile ? 'true' : 'false';
     }
 
-    function triggerCardAction(action) {
-        if (!state.elements.sessionCard || !action) {
-            return false;
-        }
-        const trigger = state.elements.sessionCard.querySelector(`[data-action="${action}"]`);
-        if (!trigger || trigger.disabled) {
-            return false;
-        }
-        trigger.click();
-        return true;
-    }
-
-    function triggerPrimaryCardAction() {
-        const stage = state.session.stage;
-        if (stage === 'feedback') {
-            return triggerCardAction('next-word');
-        }
-        if (stage === 'batch-finished') {
-            return triggerCardAction('next-batch') || triggerCardAction('end-session');
-        }
-        if (stage === 'complete') {
-            return triggerCardAction('end-session');
-        }
-        return false;
-    }
-
     function bindEvents() {
         if (!state.container) {
             return;
@@ -793,18 +835,38 @@
             state.container.dataset.modeBound = 'true';
         }
         if (!state.lifecycleBound) {
-            window.addEventListener('beforeunload', flushVocabStudyTime);
-            window.addEventListener('pagehide', flushVocabStudyTime);
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') flushVocabStudyTime();
+            window.addEventListener('beforeunload', pauseVocabStudyTime);
+            window.addEventListener('pagehide', pauseVocabStudyTime);
+            window.addEventListener('ielts:before-cloud-sync', () => flushVocabStudyTime());
+            window.addEventListener('ielts:vocab-checkpoint-updated', () => {
+                // The remote checkpoint is already persisted; never flush the stale in-memory queue over it.
+                sessionActiveStartTime = null;
+                lastCheckpointSignature = null;
+                stopActivePronunciation();
+                Object.assign(state.session, { stage: 'loading', currentWord: null, currentWordItem: null, activeQueue: [], backlog: [] });
+                resetSessionState();
+                state.ui.sessionVisible = false;
+                const main = state.container?.querySelector('[data-vocab-role="main"]');
+                const dashboard = state.container?.querySelector('[data-vocab-role="mode-dashboard"]');
+                main?.setAttribute('hidden', 'hidden');
+                dashboard?.removeAttribute('hidden');
+                updateModeCounts();
             });
+            document.addEventListener('visibilitychange', updateStudyVisibility);
             document.querySelectorAll('.nav-btn').forEach(btn => {
-                btn.addEventListener('click', flushVocabStudyTime);
+                btn.addEventListener('click', pauseVocabStudyTime);
             });
+            if (typeof window.MutationObserver === 'function') {
+                const observer = new window.MutationObserver(updateStudyVisibility);
+                observer.observe(state.container, { attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+                observer.observe(document.body, { childList: true });
+                state.visibilityObserver = observer;
+            }
             state.lifecycleBound = true;
         }
         if (!state.keyboardHandler) {
             state.keyboardHandler = (event) => {
+                if (!isVocabViewVisible() || hasToolModal() || event.repeat || event.isComposing) return;
                 if (event.code === 'Tab' || event.key === 'Tab') {
                     if (isListModalOpen()) {
                         trapModalFocus(event, state.elements.listDialog);
@@ -839,12 +901,14 @@
                     return;
                 }
                 const activeTag = document.activeElement?.tagName;
-                const isFieldActive = ['INPUT', 'TEXTAREA'].includes(activeTag);
-                if (isFieldActive && !(command === 'submit' && state.session.stage === 'spelling')) {
-                    if (!(command === 'reveal' && state.session.stage === 'recognition')) {
-                        return;
-                    }
+                const isFieldActive = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag) || document.activeElement?.isContentEditable;
+                if (!state.ui.sessionVisible && !state.menuOpen) return;
+                if (state.session.stage === 'batch-spelling' && command === 'submit') {
+                    event.preventDefault();
+                    checkBatchSpelling();
+                    return;
                 }
+                if (isFieldActive) return;
                 if (state.session.stage === 'recognition' && !isFieldActive) {
                     const subStage = state.session.subStage || 'testing';
                     const passStage = state.session.currentWordItem?.passStage || 0;
@@ -1039,6 +1103,7 @@
     }
 
     function openSettingsModal(restoreFocus = document.activeElement) {
+        pauseVocabStudyTime();
         if (!state.elements.settingsModal) {
             showFeedbackMessage('设置面板未加载', 'warning');
             return;
@@ -1058,6 +1123,7 @@
         state.ui.settingsSaveToken += 1;
         state.elements.settingsModal.removeAttribute('hidden');
         state.elements.settingsModal.dataset.open = 'true';
+        pauseVocabStudyTime();
         const focusTarget = state.elements.settingsDialog?.querySelector('input, button, select, textarea');
         if (focusTarget && typeof focusTarget.focus === 'function') {
             focusTarget.focus();
@@ -1084,6 +1150,7 @@
             focusElement(previousFocus);
         }
         state.ui.settingsRestoreFocus = null;
+        updateStudyVisibility();
     }
 
     async function handleSettingsSubmit(event) {
@@ -1440,7 +1507,7 @@
                 intent = 'review';
                 label = `开始复习（${stats.dueCount}）`;
             } else if (stats.newCandidateCount > 0) {
-                const limit = stats.dailyNew > 0 ? stats.dailyNew : stats.newCandidateCount;
+                const limit = Math.max(0, stats.dailyNew);
                 const displayCount = Math.min(stats.newCandidateCount, limit);
                 intent = 'new';
                 label = `新词起步（${displayCount}）`;
@@ -1514,6 +1581,27 @@
         }
         if (noteStatus) {
             noteStatus.textContent = '';
+        }
+    }
+
+    async function saveCurrentNote() {
+        const word = state.session.currentWord;
+        const input = state.elements.sideBody?.querySelector('[data-field="note"]');
+        const status = state.elements.sideBody?.querySelector('[data-field="note-status"]');
+        if (!word || !input || !state.store) return false;
+        try {
+            const updated = await state.store.updateWord(word.id, { note: input.value });
+            if (!updated) throw new Error('词汇记录不存在');
+            if (state.session.currentWord?.id === word.id) {
+                state.session.currentWord = updated;
+                if (state.session.currentWordItem) state.session.currentWordItem.word = updated;
+            }
+            if (status) status.textContent = '已保存';
+            return true;
+        } catch (error) {
+            if (status) status.textContent = '保存失败，请重试';
+            showFeedbackMessage('笔记保存失败：' + (error.message || error), 'error');
+            return false;
         }
     }
 
@@ -1698,6 +1786,7 @@
     }
 
     async function openListModal(restoreFocus = document.activeElement) {
+        pauseVocabStudyTime();
         if (!state.store || typeof state.store.init !== 'function') {
             showFeedbackMessage('词汇数据尚未准备就绪', 'warning');
             return;
@@ -1736,6 +1825,7 @@
         state.ui.listBrowserPage = 1;
         state.elements.listModal.removeAttribute('hidden');
         state.elements.listModal.dataset.open = 'true';
+        pauseVocabStudyTime();
         if (state.elements.listSearch) {
             state.elements.listSearch.value = state.ui.listBrowserQuery;
         }
@@ -1765,6 +1855,7 @@
             focusElement(previousFocus);
         }
         state.ui.listRestoreFocus = null;
+        updateStudyVisibility();
     }
 
     function exportCurrentList() {
@@ -1800,28 +1891,9 @@
         showFeedbackMessage('可分享词表已导出', 'success');
     }
 
-    function buildFeedbackSummary(status, word) {
-        const nextReview = word.nextReview ? new Date(word.nextReview).toLocaleString() : '稍后安排';
-        if (status === 'correct') {
-            return {
-                title: '太棒了！',
-                message: `将于 ${nextReview} 再次复习。`
-            };
-        }
-        if (status === 'near') {
-            return {
-                title: '接近正确',
-                message: `拼写差一点：${word.word}`
-            };
-        }
-        return {
-            title: '别急',
-            message: `正确是：${word.word}`
-        };
-    }
-
     function handleCardAction(event) {
-        if (isSettingsModalOpen() || isListModalOpen()) {
+        if (event.detail > 1) return;
+        if (isSettingsModalOpen() || isListModalOpen() || state.session.markingFamiliar) {
             return;
         }
         const trigger = event.target?.closest ? event.target.closest('[data-action]') : null;
@@ -1830,25 +1902,20 @@
             return;
         }
         if (event.preventDefault) event.preventDefault();
+        if (action.startsWith('action-') && state.session.stage !== 'recognition') return;
 
         // 1. 第一关认知动作
         if (action === 'action-know') {
             const item = state.session.currentWordItem;
-            const w = normalizeWord(item?.word || state.session.currentWord);
-            if (item && w) {
-                item.passStage = 2;
-                const completed = getCompletedWords();
-                if (!completed.some(cw => (cw.id || cw.word) === (w.id || w.word))) {
-                    completed.push(w);
-                }
-                if (window.StudyStatsManager) {
-                    try { window.StudyStatsManager.recordWordStudied(w.word); } catch (_) {}
-                }
+            if (item) {
+                item.passStage = 1;
+                interleaveWord(item);
             }
             nextCard();
             return;
         }
         if (action === 'action-hint') {
+            recordRecognitionDifficulty('hard');
             state.session.subStage = 'hint-revealed';
             const w = normalizeWord(state.session.currentWord || state.session.currentWordItem?.word);
             if (w) playWordPronunciation(w);
@@ -1856,6 +1923,7 @@
             return;
         }
         if (action === 'action-unknown') {
+            recordRecognitionDifficulty('wrong');
             state.session.subStage = 'detail-review';
             if (state.session.currentWordItem) {
                 state.session.currentWordItem.passStage = 0;
@@ -1875,6 +1943,7 @@
             return;
         }
         if (action === 'action-hint-wrong') {
+            recordRecognitionDifficulty('wrong');
             const item = state.session.currentWordItem;
             if (item) {
                 item.passStage = 0;
@@ -1903,14 +1972,12 @@
                 if (!completed.some(cw => (cw.id || cw.word) === (w.id || w.word))) {
                     completed.push(w);
                 }
-                if (window.StudyStatsManager) {
-                    try { window.StudyStatsManager.recordWordStudied(w.word); } catch (_) {}
-                }
             }
             nextCard();
             return;
         }
         if (action === 'action-p2-unknown') {
+            recordRecognitionDifficulty('wrong');
             const item = state.session.currentWordItem;
             if (item) {
                 item.passStage = 0;
@@ -1925,11 +1992,13 @@
         // 3. 通用辅助动作
         if (action === 'play-pronounce') {
             const w = normalizeWord(state.session.currentWord || state.session.currentWordItem?.word);
-            if (w) playWordPronunciation(w);
+            if (w) playCurrentPronunciation(trigger, w);
             return;
         }
         if (action === 'open-dict-drawer') {
-            const w = normalizeWord(state.session.currentWord || state.session.currentWordItem?.word);
+            const w = normalizeWord(state.session.stage === 'batch-spelling'
+                ? state.session.spellingWords?.[state.session.spellingIndex]
+                : state.session.currentWord || state.session.currentWordItem?.word);
             if (w) openDictionaryDrawer(w);
             return;
         }
@@ -1938,6 +2007,8 @@
             return;
         }
         if (action === 'return-mode-dash') {
+            state.ui.sessionVisible = false;
+            pauseVocabStudyTime();
             const mainBody = state.container?.querySelector('[data-vocab-role="main"]');
             const modeDash = state.container?.querySelector('[data-vocab-role="mode-dashboard"]');
             const topProgress = state.container?.querySelector('[data-vocab-role="progress"]');
@@ -1949,6 +2020,10 @@
         }
 
         // 4. 组末集中拼写与结算动作
+        if (action === 'retry-batch-save') {
+            finishBatchSession();
+            return;
+        }
         if (action === 'spelling-submit') {
             checkBatchSpelling();
             return;
@@ -1977,12 +2052,6 @@
             startReviewFlow({ preferNew: true });
             return;
         }
-    }
-
-    function revealMeaning() {
-        state.session.meaningVisible = !state.session.meaningVisible;
-        state.ui.sidePanelManual = null;
-        render();
     }
 
     function buildBritishPronunciationUrl(value) {
@@ -2018,6 +2087,7 @@
 
     function stopActivePronunciation() {
         pronunciationEpoch += 1;
+        window.speechSynthesis?.cancel();
         if (!activePronunciationAudio) {
             return;
         }
@@ -2042,8 +2112,8 @@
         announce(`${word} 暂无可直接播放的真人英音`);
     }
 
-    async function playCurrentPronunciation(trigger) {
-        const word = String(state.session.currentWord?.word || '').trim();
+    async function playCurrentPronunciation(trigger, wordOverride) {
+        const word = String(wordOverride?.word || state.session.currentWord?.word || '').trim();
         const audioUrl = buildBritishPronunciationUrl(word);
         const AudioCtor = window.Audio;
         if (!word || !audioUrl || typeof AudioCtor !== 'function') {
@@ -2085,6 +2155,7 @@
     async function markCurrentWordFamiliar(trigger) {
         const item = state.session.currentWordItem;
         const word = normalizeWord(item?.word || state.session.currentWord);
+        if (state.session.markingFamiliar || state.session.finishing) return false;
         if (!word || !state.store || typeof state.store.updateWord !== 'function') {
             return false;
         }
@@ -2092,6 +2163,7 @@
             trigger.disabled = true;
             trigger.textContent = '正在保存…';
         }
+        state.session.markingFamiliar = true;
         const now = new Date().toISOString();
         const config = typeof state.store.getConfig === 'function' ? state.store.getConfig() : {};
         const masteryTarget = Number(config.masteryCount || 4);
@@ -2110,7 +2182,7 @@
                 item.passStage = 2;
             }
             if (!state.session.completedWords.some(cw => (cw.id || cw.word) === (word.id || word.word))) {
-                state.session.completedWords.push(word);
+                state.session.completedWords.push({ ...word, ...committed, familiar: true });
             }
             state.session.activeQueue = (state.session.activeQueue || []).filter((it) => {
                 const nw = normalizeWord(it.word || it);
@@ -2125,7 +2197,6 @@
             if (window.StudyStatsManager) {
                 try {
                     window.StudyStatsManager.recordWordStudied(word.word);
-                    window.StudyStatsManager.addVocabStudyDuration(15);
                     window.StudyStatsManager.render();
                 } catch (_) {}
             }
@@ -2133,9 +2204,11 @@
 
             showFeedbackMessage(`“${word.word}”已标为熟词并通关！`, 'success');
             announce(`${word.word} 已标为熟词`);
+            state.session.markingFamiliar = false;
             nextCard();
             return true;
         } catch (error) {
+            state.session.markingFamiliar = false;
             showFeedbackMessage(`标记熟词失败：${error.message || error}`, 'error');
             if (trigger) {
                 trigger.disabled = false;
@@ -2143,331 +2216,6 @@
             }
             return false;
         }
-    }
-
-    function levenshteinDistance(a, b) {
-        const s = (a || '').toLowerCase().trim();
-        const t = (b || '').toLowerCase().trim();
-        if (!s.length) {
-            return t.length;
-        }
-        if (!t.length) {
-            return s.length;
-        }
-        const costs = Array(t.length + 1).fill(0);
-        for (let j = 0; j <= t.length; j += 1) {
-            costs[j] = j;
-        }
-        for (let i = 1; i <= s.length; i += 1) {
-            let lastValue = i - 1;
-            costs[0] = i;
-            for (let j = 1; j <= t.length; j += 1) {
-                const newValue = Math.min(
-                    costs[j] + 1,
-                    costs[j - 1] + 1,
-                    lastValue + (s[i - 1] === t[j - 1] ? 0 : 1)
-                );
-                lastValue = costs[j];
-                costs[j] = newValue;
-            }
-        }
-        return costs[t.length];
-    }
-
-    function evaluateAnswer(input, word) {
-        const normalizedAnswer = (input || '').trim();
-        const normalizedWord = (word.word || '').trim();
-        if (!normalizedWord) {
-            return { status: 'wrong', quality: 'wrong', distance: 0 };
-        }
-        if (!normalizedAnswer) {
-            return { status: 'wrong', quality: 'wrong', distance: normalizedWord.length };
-        }
-        if (normalizedAnswer.toLowerCase() === normalizedWord.toLowerCase()) {
-            return { status: 'correct', quality: 'good', distance: 0 };
-        }
-        const distance = levenshteinDistance(normalizedAnswer, normalizedWord);
-        if (distance <= 1) {
-            return { status: 'near', quality: 'hard', distance };
-        }
-        return { status: 'wrong', quality: 'wrong', distance };
-    }
-
-    function scheduleNear(word, now) {
-        const scheduler = state.scheduler;
-        const baseBox = Number(word.box) || (scheduler ? scheduler.MIN_BOX : 1);
-        const nextReview = scheduler && typeof scheduler.calculateNextReview === 'function'
-            ? scheduler.calculateNextReview(baseBox, now)
-            : new Date(now.getTime() + 3 * 60 * 60 * 1000);
-        const delta = Math.max(10 * 60 * 1000, Math.floor((nextReview.getTime() - now.getTime()) / 2));
-        return {
-            box: baseBox,
-            correctCount: Number(word.correctCount) || 0,
-            lastReviewed: now.toISOString(),
-            nextReview: new Date(now.getTime() + delta).toISOString()
-        };
-    }
-
-    function submitSpelling() {
-        const card = state.elements.sessionCard;
-        if (!card) {
-            return;
-        }
-        const input = card.querySelector('input[name="answer"]');
-        if (!input) {
-            return;
-        }
-        const answer = input.value.trim();
-        const word = state.session.currentWord;
-        
-        if (!answer) {
-            return;
-        }
-        
-        state.session.typedAnswer = answer;
-        
-        // 检查拼写是否正确
-        const isCorrect = answer.toLowerCase() === word.word.toLowerCase();
-        
-        if (isCorrect) {
-            // 拼写正确，使用认识质量
-            const recognitionQuality = state.session.recognitionQuality || 'good';
-            applyResult(recognitionQuality, { answer, spellingCorrect: true });
-            return;
-        }
-        
-        // 拼写错误，增加尝试次数
-        state.session.spellingAttempts = (state.session.spellingAttempts || 0) + 1;
-        const maxAttempts = 3;
-        
-        if (state.session.spellingAttempts >= maxAttempts) {
-            // 达到最大尝试次数，标记为错误
-            applyResult('wrong', { answer, spellingCorrect: false, attemptsExhausted: true });
-            return;
-        }
-        
-        // 还有机会，重新渲染
-        state.session.typedAnswer = '';
-        render();
-        
-        // 显示错误提示
-        if (typeof window.showToast === 'function') {
-            window.showToast(`拼写错误，还有 ${maxAttempts - state.session.spellingAttempts} 次机会`, 'warning');
-        }
-    }
-
-    async function applyResult(qualityOrStatus, options = {}) {
-        const session = state.session;
-        const word = session.currentWord;
-        if (!word || !state.store || !state.scheduler) {
-            return;
-        }
-        if (session.stage !== 'spelling' && !options.skipped) {
-            return;
-        }
-        const now = new Date();
-
-        // 记录背单词学习时间与词汇量
-        if (window.StudyStatsManager && word && word.word) {
-            try {
-                window.StudyStatsManager.recordWordStudied(word.word);
-                window.StudyStatsManager.addVocabStudyDuration(15);
-            } catch (_) {}
-        }
-        
-        // 基础质量评分（来自认识判断）
-        const recognitionQuality = session.recognitionQuality || 'good';
-        const spellingAttempts = session.spellingAttempts || 0;
-        const skipped = options.skipped || false;
-        const isIntraReview = word.__intraReview === true;
-        const cycleType = word.__cycleType || 'normal';
-        
-        // 确定最终质量（考虑拼写错误）
-        let finalQuality = recognitionQuality;
-        if (qualityOrStatus === 'wrong' || options.attemptsExhausted || skipped) {
-            // 拼写失败和跳过都必须按遗忘处理，不能增加正确次数或拉长复习间隔。
-            finalQuality = 'wrong';
-        } else if (spellingAttempts >= 2) {
-            finalQuality = 'hard'; // 多次拼写错误视为困难
-        } else if (spellingAttempts === 1 && recognitionQuality === 'easy') {
-            finalQuality = 'good'; // 简单但拼写错误降为一般
-        }
-        
-        // 处理新词或轮内循环
-        let patch;
-        if (!word.easeFactor) {
-            // 新词先建立 EF；遗忘结果还要继续走失败调度，避免只初始化却未记录复习。
-            const initialQuality = finalQuality === 'wrong' ? 'hard' : finalQuality;
-            patch = state.scheduler.setInitialEaseFactor(word, initialQuality);
-            if (finalQuality === 'wrong') {
-                patch = state.scheduler.scheduleAfterResult(patch, 'wrong', now);
-            }
-        } else if (isIntraReview) {
-            // 轮内循环：调整难度因子
-            patch = state.scheduler.adjustIntraCycleEF(
-                word,
-                finalQuality === 'wrong' ? 'hard' : finalQuality
-            );
-        } else {
-            // 正常复习：使用标准SM-2算法
-            patch = state.scheduler.scheduleAfterResult(word, finalQuality, now);
-        }
-        
-        // 判断是否需要继续轮内循环或安排验证
-        const intraCycles = patch.intraCycles || 0;
-        const maxCycles = state.scheduler.SM2_CONSTANTS.MAX_INTRA_CYCLES;
-        
-        let needsContinueIntra = false;
-        let needsEasyVerification = false;
-        
-        if (cycleType === 'easy_verification') {
-            // easy验证阶段
-            if (finalQuality === 'easy') {
-                // 验证通过，正式进入复习队列
-                patch = state.scheduler.scheduleAfterResult(patch, 'easy', now);
-            } else {
-                // 验证失败，重新进入轮内循环
-                patch.intraCycles = 1;
-                needsContinueIntra = true;
-            }
-        } else if (!isIntraReview) {
-            // 首次接触
-            if (finalQuality === 'easy') {
-                // easy直接进入复习队列，不需要验证
-                patch = state.scheduler.scheduleAfterResult(patch, 'easy', now);
-            } else if (finalQuality === 'good' || finalQuality === 'hard') {
-                // good/hard进入轮内循环
-                needsContinueIntra = true;
-            }
-        } else {
-            // 轮内循环中
-            if (finalQuality === 'easy') {
-                // 任何一次easy都要验证
-                needsEasyVerification = true;
-                patch.intraCycles = 0; // 重置循环计数
-            } else if (intraCycles < maxCycles) {
-                // good/hard继续循环
-                needsContinueIntra = true;
-            } else {
-                // 达到最大循环次数，强制毕业
-                patch = state.scheduler.scheduleAfterResult(patch, finalQuality, now);
-            }
-        }
-        
-        // 安排后续复习
-        if (needsEasyVerification) {
-            scheduleIntraReview(patch, 'easy_verification');
-        } else if (needsContinueIntra) {
-            scheduleIntraReview(patch, 'normal');
-        }
-        
-        // 保存到数据库（除非是临时的轮内状态）
-        const shouldSave = !needsContinueIntra && !needsEasyVerification;
-        let updated = patch;
-        
-        if (shouldSave) {
-            updated = await state.store.updateWord(word.id, patch) || patch;
-        }
-        
-        session.currentWord = updated;
-        session.lastAnswer = {
-            recognitionQuality,
-            spellingAttempts,
-            spellingCorrect: spellingAttempts === 0 && !skipped,
-            typed: options.answer ?? session.typedAnswer,
-            skipped,
-            finalQuality,
-            isIntraReview,
-            cycleType,
-            intraCycles,
-            needsContinueIntra,
-            needsEasyVerification,
-            saved: shouldSave
-        };
-        session.stage = 'feedback';
-        session.meaningVisible = true;
-        state.ui.sidePanelManual = null;
-        session.typedAnswer = '';
-        
-        // 统计本轮答题进度与结果（每学完/过完一个词即前进）
-        if (!Array.isArray(session.completedWordIds)) {
-            session.completedWordIds = [];
-        }
-        if (word && word.id && !session.completedWordIds.includes(word.id)) {
-            session.completedWordIds.push(word.id);
-            session.progress.completed = Math.min(session.progress.total, session.completedWordIds.length);
-        }
-        if (finalQuality === 'wrong') {
-            session.progress.wrong += 1;
-        } else if (finalQuality === 'hard' || spellingAttempts > 0) {
-            session.progress.near += 1;
-        } else {
-            session.progress.correct += 1;
-        }
-        saveSessionCheckpoint();
-        
-        render();
-    }
-
-    function scheduleIntraReview(word, cycleType = 'normal') {
-        let insertPosition;
-        
-        if (cycleType === 'easy_verification') {
-            // easy验证：插入到第 20-30 个位置
-            insertPosition = Math.min(
-                state.session.activeQueue.length,
-                Math.floor(Math.random() * 11) + 20  // 20-30 随机
-            );
-        } else {
-            // 正常轮内循环：插入到第 3-8 个位置
-            insertPosition = Math.min(
-                state.session.activeQueue.length,
-                Math.floor(Math.random() * 6) + 3  // 3-8 随机
-            );
-        }
-        
-        const clone = {
-            ...word,
-            __intraReview: true,
-            __cycleType: cycleType,
-            __insertedAt: Date.now()
-        };
-        
-        state.session.activeQueue.splice(insertPosition, 0, clone);
-    }
-
-    function requeueForRetry(word, status) {
-        // 错题重测：插入到队列末尾，当天内再次复习
-        const clone = { ...word, __retry: true };
-        clone.__retryDue = Date.now() + (RETRY_DELAYS[status] || RETRY_DELAYS.wrong);
-        state.session.activeQueue.push(clone);
-    }
-
-    async function rateAndContinue(quality) {
-        const session = state.session;
-        const word = session.currentWord;
-        if (!word || session.stage !== 'feedback') {
-            return;
-        }
-        
-        // 如果用户重新评分，更新调度
-        if (session.lastAnswer && session.lastAnswer.quality !== quality) {
-            const now = new Date();
-            const patch = state.scheduler.scheduleAfterResult(word, quality, now);
-            try {
-                const committedWord = await state.store.updateWord(word.id, patch);
-                if (!committedWord) {
-                    throw new Error('词汇记录不存在');
-                }
-                session.currentWord = committedWord;
-                session.lastAnswer.quality = quality;
-            } catch (error) {
-                showFeedbackMessage(`评分保存失败：${error.message || error}`, 'error');
-                return;
-            }
-        }
-        
-        moveToNextWord();
     }
 
     function getCompletedWords() {
@@ -2504,6 +2252,7 @@
             }
         }
         return {
+            ...candidate,
             id: candidate.id || wStr,
             word: wStr,
             phonetic: candidate.phonetic || '',
@@ -2556,142 +2305,182 @@
         startBatchSpelling(session.completedWords);
     }
 
+    function recordRecognitionDifficulty(quality) {
+        const id = state.session.currentWord?.id;
+        if (!id) return;
+        state.session.recognitionResults ||= {};
+        if (state.session.recognitionResults[id] !== 'wrong') state.session.recognitionResults[id] = quality;
+        saveSessionCheckpoint();
+    }
+
+    function getSpellingResult(word) {
+        state.session.spellingResults ||= {};
+        return state.session.spellingResults[word.id] ||= { wrongAttempts: 0, hintUsed: false, skipped: false, answered: false };
+    }
+
     function startBatchSpelling(words) {
         const session = state.session;
         session.stage = 'batch-spelling';
-        session.spellingWords = Array.isArray(words) && words.length 
-            ? words.map(w => normalizeWord(w)).filter(Boolean)
-            : (session.batchWords || []).map(w => normalizeWord(w)).filter(Boolean);
+        session.spellingWords = (Array.isArray(words) ? words : session.batchWords || [])
+            .map(w => normalizeWord(w)).filter(w => w && !w.familiar);
         session.spellingIndex = 0;
         session.spellingInput = '';
         session.spellingHintChars = 0;
         session.spellingFeedback = '';
+        session.spellingAdvancing = false;
         saveSessionCheckpoint();
+        if (!session.spellingWords.length) {
+            finishBatchSession();
+            return;
+        }
         render();
     }
 
-    function checkBatchSpelling() {
+    function advanceBatchSpelling(delay) {
         const session = state.session;
-        const words = session.spellingWords || [];
-        const currentWord = words[session.spellingIndex] ? normalizeWord(words[session.spellingIndex]) : null;
-        if (!currentWord) return;
-
-        const card = state.elements.sessionCard;
-        const input = card?.querySelector('[data-field="batch-spell-input"]');
-        const feedback = card?.querySelector('[data-field="batch-spell-feedback"]');
-
-        const typed = (input?.value || session.spellingInput || '').trim().toLowerCase();
-        const target = String(currentWord.word || '').trim().toLowerCase();
-
-        if (typed === target) {
-            if (feedback) {
-                feedback.style.color = '#10b981';
-                feedback.textContent = '✓ 拼写正确！';
-            }
-            if (input) {
-                input.style.borderColor = '#10b981';
-                input.style.background = '#f0fdf4';
-            }
-            playWordPronunciation(currentWord);
-            setTimeout(() => {
-                session.spellingIndex += 1;
-                session.spellingInput = '';
-                session.spellingHintChars = 0;
-                session.spellingFeedback = '';
-                if (session.spellingIndex >= session.spellingWords.length) {
-                    finishBatchSession();
-                } else {
-                    render();
-                }
-            }, 600);
-        } else {
-            if (feedback) {
-                feedback.style.color = '#ea580c';
-                feedback.textContent = '拼写不匹配，再试一次或点击提示';
-            }
-            if (input) {
-                input.style.borderColor = '#ef4444';
-                input.focus();
-            }
-        }
-    }
-
-    function giveBatchSpellingHint() {
-        const session = state.session;
-        const words = session.spellingWords || [];
-        const currentWord = words[session.spellingIndex] ? normalizeWord(words[session.spellingIndex]) : null;
-        if (!currentWord) return;
-
-        const card = state.elements.sessionCard;
-        const input = card?.querySelector('[data-field="batch-spell-input"]');
-        const target = String(currentWord.word || '').trim();
-
-        session.spellingHintChars = Math.min((session.spellingHintChars || 0) + 1, target.length);
-        const hintPart = target.slice(0, session.spellingHintChars);
-        session.spellingInput = hintPart;
-        if (input) {
-            input.value = hintPart;
-            input.focus();
-        }
-    }
-
-    function skipBatchSpelling() {
-        const session = state.session;
-        const words = session.spellingWords || [];
-        const currentWord = words[session.spellingIndex] ? normalizeWord(words[session.spellingIndex]) : null;
-        if (!currentWord) return;
-
-        const card = state.elements.sessionCard;
-        const input = card?.querySelector('[data-field="batch-spell-input"]');
-        const feedback = card?.querySelector('[data-field="batch-spell-feedback"]');
-        const target = String(currentWord.word || '').trim();
-
-        if (input) input.value = target;
-        if (feedback) {
-            feedback.style.color = '#ea580c';
-            feedback.textContent = `正确拼写为: ${target}`;
-        }
-        playWordPronunciation(currentWord);
+        if (session.spellingAdvancing || session.finishing || session.stage !== 'batch-spelling') return;
+        session.spellingAdvancing = true;
+        const index = session.spellingIndex;
+        const sessionId = session.sessionId;
         setTimeout(() => {
-            session.spellingIndex += 1;
+            if (state.session !== session || session.sessionId !== sessionId
+                || session.spellingIndex !== index || session.stage !== 'batch-spelling') return;
+            session.spellingIndex = index + 1;
             session.spellingInput = '';
             session.spellingHintChars = 0;
             session.spellingFeedback = '';
+            session.spellingAdvancing = false;
+            saveSessionCheckpoint();
             if (session.spellingIndex >= session.spellingWords.length) {
                 finishBatchSession();
             } else {
                 render();
             }
-        }, 1200);
+        }, delay);
+    }
+
+    function checkBatchSpelling() {
+        const session = state.session;
+        if (session.stage !== 'batch-spelling' || session.spellingAdvancing || session.finishing) return;
+        const word = normalizeWord(session.spellingWords?.[session.spellingIndex]);
+        if (!word) return;
+        const input = state.elements.sessionCard?.querySelector('[data-field="batch-spell-input"]');
+        const feedback = state.elements.sessionCard?.querySelector('[data-field="batch-spell-feedback"]');
+        const typed = (input?.value ?? session.spellingInput ?? '').trim().toLowerCase();
+        if (!typed) return;
+        const result = getSpellingResult(word);
+        if (typed === word.word.trim().toLowerCase()) {
+            result.answered = true;
+            if (feedback) {
+                feedback.style.color = '#10b981';
+                feedback.textContent = '✓ 拼写正确！';
+            }
+            playWordPronunciation(word);
+            saveSessionCheckpoint();
+            advanceBatchSpelling(600);
+        } else {
+            result.wrongAttempts += 1;
+            if (feedback) {
+                feedback.style.color = '#ea580c';
+                feedback.textContent = '拼写不匹配，再试一次或点击提示';
+            }
+            input?.focus();
+            saveSessionCheckpoint();
+        }
+    }
+
+    function giveBatchSpellingHint() {
+        const session = state.session;
+        if (session.stage !== 'batch-spelling' || session.spellingAdvancing || session.finishing) return;
+        const word = normalizeWord(session.spellingWords?.[session.spellingIndex]);
+        if (!word) return;
+        getSpellingResult(word).hintUsed = true;
+        const input = state.elements.sessionCard?.querySelector('[data-field="batch-spell-input"]');
+        session.spellingHintChars = Math.min((session.spellingHintChars || 0) + 1, word.word.length);
+        session.spellingInput = word.word.slice(0, session.spellingHintChars);
+        if (input) {
+            input.value = session.spellingInput;
+            input.focus();
+        }
+        saveSessionCheckpoint();
+    }
+
+    function skipBatchSpelling() {
+        const session = state.session;
+        if (session.stage !== 'batch-spelling' || session.spellingAdvancing || session.finishing) return;
+        const word = normalizeWord(session.spellingWords?.[session.spellingIndex]);
+        if (!word) return;
+        const result = getSpellingResult(word);
+        result.skipped = true;
+        result.answered = true;
+        const input = state.elements.sessionCard?.querySelector('[data-field="batch-spell-input"]');
+        const feedback = state.elements.sessionCard?.querySelector('[data-field="batch-spell-feedback"]');
+        if (input) input.value = word.word;
+        if (feedback) {
+            feedback.style.color = '#ea580c';
+            feedback.textContent = '正确拼写为: ' + word.word;
+        }
+        playWordPronunciation(word);
+        saveSessionCheckpoint();
+        advanceBatchSpelling(1200);
+    }
+
+    function batchWordQuality(word) {
+        const result = getSpellingResult(word);
+        const recognition = state.session.recognitionResults?.[word.id];
+        if (result.skipped || result.wrongAttempts > 0 || recognition === 'wrong') return 'wrong';
+        if (result.hintUsed || recognition === 'hard') return 'hard';
+        return 'good';
     }
 
     async function finishBatchSession() {
         const session = state.session;
-        session.stage = 'batch-summary';
-
-        // 统一提交本组全部已学单词并记录艾宾浩斯复习时间
-        const now = new Date();
-        for (const rawW of (session.spellingWords || [])) {
-            const w = normalizeWord(rawW);
-            if (!w) continue;
-            try {
-                const patch = state.scheduler.scheduleAfterResult(w, 'good', now);
-                await state.store.updateWord(w.id, {
-                    ...patch,
-                    lastReviewed: now.toISOString()
-                });
-                if (window.StudyStatsManager) {
-                    window.StudyStatsManager.recordWordStudied(w.word);
-                    window.StudyStatsManager.addVocabStudyDuration(30);
-                }
-            } catch (_) {}
-        }
-        if (window.StudyStatsManager) {
-            try { window.StudyStatsManager.render(); } catch (_) {}
-        }
-
-        clearSessionCheckpoint();
+        if (session.finishing || session.stage === 'batch-summary') return false;
+        const words = (session.spellingWords || []).map(normalizeWord).filter(w => w && !w.familiar);
+        // Never graduate a batch when an unanswered item remains (including a malformed checkpoint).
+        if (words.some(w => !getSpellingResult(w).answered)) return false;
+        session.finishing = true;
+        session.stage = 'batch-saving';
+        pauseVocabStudyTime();
+        session.savedWordIds ||= [];
+        session.countedWordIds ||= [];
         render();
+        try {
+            const now = new Date();
+            for (const word of words) {
+                if (session.savedWordIds.includes(word.id)) continue;
+                const latestWord = state.store.getWords?.().find(item => item.id === word.id) || word;
+                const patch = state.scheduler.scheduleAfterResult(latestWord, batchWordQuality(word), now);
+                const updated = await state.store.updateWord(word.id, { ...patch, lastReviewed: now.toISOString() });
+                if (!updated) throw new Error('词汇记录不存在：' + word.word);
+                session.savedWordIds.push(word.id);
+                saveSessionCheckpoint();
+            }
+            for (const word of words) {
+                if (session.countedWordIds.includes(word.id)) continue;
+                window.StudyStatsManager?.recordWordStudied(word.word);
+                session.countedWordIds.push(word.id);
+                saveSessionCheckpoint();
+            }
+            session.progress.completed = session.progress.total;
+            session.progress.correct = words.filter(w => batchWordQuality(w) === 'good').length;
+            session.progress.near = words.filter(w => batchWordQuality(w) === 'hard').length;
+            session.progress.wrong = words.filter(w => batchWordQuality(w) === 'wrong').length;
+            session.stage = 'batch-summary';
+            window.StudyStatsManager?.render();
+            saveSessionCheckpoint();
+            render();
+            return true;
+        } catch (error) {
+            session.stage = 'batch-save-error';
+            session.saveError = String(error.message || error);
+            saveSessionCheckpoint();
+            showFeedbackMessage('本组尚未全部保存，进度已保留，请重试：' + session.saveError, 'error');
+            render();
+            return false;
+        } finally {
+            session.finishing = false;
+        }
     }
 
     function startBatch(force) {
@@ -2705,6 +2494,14 @@
             return;
         }
         state.ui.sidePanelManual = null;
+        session.sessionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        session.listId = state.store?.getActiveListId?.() || 'default';
+        session.spellingResults = {};
+        session.recognitionResults = {};
+        session.savedWordIds = [];
+        session.countedWordIds = [];
+        session.finishing = false;
+        session.spellingAdvancing = false;
         session.batchIndex += 1;
         const batchLimit = session.batchSize || DEFAULT_BATCH_SIZE;
         const rawBatch = (session.backlog || []).splice(0, batchLimit);
@@ -2726,38 +2523,21 @@
         };
         hideDueBanner();
         session.stage = 'recognition';
+        resumeVocabStudyTime();
         saveSessionCheckpoint();
         render();
     }
 
     function endCurrentSession() {
+        state.ui.sessionVisible = false;
+        pauseVocabStudyTime();
         state.session.stage = 'complete';
         render();
         navigateToMoreView();
     }
 
     function playWordPronunciation(wordObj) {
-        if (!wordObj || !wordObj.word) return;
-        const audioUrl = buildBritishPronunciationUrl(wordObj.word);
-        if (audioUrl) {
-            const audio = new Audio(audioUrl);
-            audio.play().catch(() => {
-                if ('speechSynthesis' in window) {
-                    const u = new SpeechSynthesisUtterance(wordObj.word);
-                    u.lang = 'en-GB';
-                    window.speechSynthesis.speak(u);
-                }
-            });
-        } else if ('speechSynthesis' in window) {
-            const u = new SpeechSynthesisUtterance(wordObj.word);
-            u.lang = 'en-GB';
-            window.speechSynthesis.speak(u);
-        }
-    }
-
-    function isLearnedWord(w) {
-        if (!w) return false;
-        return Boolean(w.familiar || w.lastReviewed || w.nextReview || (Number(w.correctCount || 0) > 0));
+        return playCurrentPronunciation(null, wordObj);
     }
 
     function formatWordDate(w) {
@@ -2805,9 +2585,10 @@
         }
     }
 
-    // 权威词典抽屉 (剑桥/牛津权威中英释义、例句与音标，站内直接查看无需跳转)
+    // Free Dictionary API results, with the local word list as an explicitly labeled fallback.
     async function openDictionaryDrawer(wordObj) {
         if (!wordObj || !wordObj.word) return;
+        pauseVocabStudyTime();
         const word = wordObj.word;
 
         document.querySelectorAll('.vocab-dict-drawer').forEach(el => el.remove());
@@ -2819,31 +2600,31 @@
                 <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; background: #ffffff;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 1.25rem;">📖</span>
-                        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">权威学术词典</h3>
+                        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">词典参考</h3>
                     </div>
                     <button type="button" class="vocab-tool-close-btn" data-action="close-dict-drawer" style="border: none; background: transparent; font-size: 1.3rem; cursor: pointer; color: #64748b;">✕</button>
                 </div>
                 <div class="vocab-dict-body">
                     <div style="margin-bottom: 24px;">
                         <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px;">
-                            <h2 style="margin: 0; font-size: 2rem; font-weight: 800; color: #ea580c; letter-spacing: -0.02em;">${word}</h2>
+                            <h2 style="margin: 0; font-size: 2rem; font-weight: 800; color: #ea580c; letter-spacing: -0.02em;">${escapeHtml(word)}</h2>
                             <button type="button" class="btn btn-sm btn-ghost" data-action="play-dict-audio" style="font-size: 0.95rem; color: #475569; padding: 4px 10px; border-radius: 999px; background: #f1f5f9;">
-                                🔊 <span data-field="dict-phonetic">${wordObj.phonetic ? `/${wordObj.phonetic}/` : '发音'}</span>
+                                🔊 <span data-field="dict-phonetic">${wordObj.phonetic ? `/${escapeHtml(wordObj.phonetic)}/` : '发音'}</span>
                             </button>
                         </div>
                         <div style="font-size: 1.05rem; font-weight: 600; color: #1e293b; line-height: 1.4; padding: 12px 16px; background: rgba(234, 88, 12, 0.06); border-radius: 12px; border-left: 4px solid #ea580c;">
-                            ${wordObj.meaning || ''}
+                            ${escapeHtml(wordObj.meaning || '')}
                         </div>
                     </div>
 
                     <div style="margin-bottom: 24px;">
                         <div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 14px;">
-                            官方学术释义与权威语料 (Cambridge / Oxford)
+                            参考释义（Free Dictionary API，非 Cambridge / Oxford 官方释义）
                         </div>
                         <div data-field="dict-definitions-container">
                             <div style="display: flex; align-items: center; gap: 10px; color: #94a3b8; padding: 16px 0;">
                                 <div class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>
-                                <span>正在检索剑桥/牛津官方学术释义…</span>
+                                <span>正在检索 Free Dictionary API…</span>
                             </div>
                         </div>
                     </div>
@@ -2886,10 +2667,10 @@
                         defsHtml += `
                             <div class="vocab-dict-def-item">
                                 <div class="vocab-dict-def-en">
-                                    <span class="vocab-dict-pos-tag">${pos}</span>
-                                    ${def.definition}
+                                    <span class="vocab-dict-pos-tag">${escapeHtml(pos)}</span>
+                                    ${escapeHtml(def.definition)}
                                 </div>
-                                ${def.example ? `<div class="vocab-dict-example">“${def.example}”</div>` : ''}
+                                ${def.example ? `<div class="vocab-dict-example">“${escapeHtml(def.example)}”</div>` : ''}
                             </div>
                         `;
                     });
@@ -2902,16 +2683,17 @@
         defContainer.innerHTML = `
             <div class="vocab-dict-def-item">
                 <div class="vocab-dict-def-en">
-                    <span class="vocab-dict-pos-tag">考点核心</span>
-                    ${wordObj.meaning || '权威语义'}
+                    <span class="vocab-dict-pos-tag">本地词表释义（在线查询未返回结果）</span>
+                    ${escapeHtml(wordObj.meaning || '暂无释义')}
                 </div>
-                ${wordObj.example ? `<div class="vocab-dict-example">“${wordObj.example}”</div>` : ''}
+                ${wordObj.example ? `<div class="vocab-dict-example">“${escapeHtml(wordObj.example)}”</div>` : ''}
             </div>
         `;
     }
 
     // 1. 沉浸刷词 (支持指定起始词索引，断点自动续刷，内置词典)
     function startImmersiveRunner(customWords = null, startIndex = -1, scope = null) {
+        pauseVocabStudyTime();
         const currentScope = scope || state.selectedScope || 'all';
         const words = customWords && customWords.length ? customWords : getWordsByScope(currentScope);
         if (!words.length) {
@@ -3138,6 +2920,7 @@
     }
 
     function runDictationSession({ words, dictMode, repeatTimes, intervalSeconds }) {
+        pauseVocabStudyTime();
         let index = 0;
         let isPaused = false;
         let timer = null;
@@ -3182,6 +2965,7 @@
             modal.querySelector('[data-field="dict-answer"]').textContent = `${w.word} (${w.meaning})`;
 
             if (dictMode === 'meaning') {
+                stopActivePronunciation();
                 modal.querySelector('[data-field="dict-prompt"]').textContent = w.meaning || '释义播报';
                 if ('speechSynthesis' in window) {
                     const u = new SpeechSynthesisUtterance(w.meaning);
@@ -3213,6 +2997,7 @@
             const action = trigger.dataset.action;
             if (action === 'stop-dictation') {
                 clearTimeout(timer);
+                stopActivePronunciation();
                 modal.remove();
             } else if (action === 'reveal-answer') {
                 const ans = modal.querySelector('[data-field="dict-answer"]');
@@ -3221,6 +3006,8 @@
                 clearTimeout(timer);
                 playWord(repeatTimes);
             } else if (action === 'pause-resume') {
+                clearTimeout(timer);
+                stopActivePronunciation();
                 isPaused = !isPaused;
                 trigger.textContent = isPaused ? '▶ 继续' : '⏸ 暂停';
                 if (!isPaused) playWord(1);
@@ -3236,6 +3023,7 @@
 
     // 3. 随手拼
     function startQuickSpellingRunner(customWords = null) {
+        pauseVocabStudyTime();
         const words = customWords && customWords.length ? customWords : getWordsByScope(state.selectedScope);
         if (!words.length) {
             showFeedbackMessage('当前选中的分类下暂无已学单词，请前往上方 Learning 学习新词！', 'info');
@@ -3357,10 +3145,10 @@
         const rows = words.map((w, i) => `
             <tr>
                 <td style="width: 40px; text-align: center; color: #94a3b8;">${i + 1}</td>
-                <td style="font-weight: bold; width: 140px;">${w.word}</td>
-                <td style="color: #64748b; font-family: monospace; width: 120px;">${w.phonetic ? `/${w.phonetic}/` : ''}</td>
-                <td style="color: #334155;">${w.meaning || ''}</td>
-                <td style="color: #64748b; font-style: italic;">${w.example || ''}</td>
+                <td style="font-weight: bold; width: 140px;">${escapeHtml(w.word)}</td>
+                <td style="color: #64748b; font-family: monospace; width: 120px;">${w.phonetic ? `/${escapeHtml(w.phonetic)}/` : ''}</td>
+                <td style="color: #334155;">${escapeHtml(w.meaning || '')}</td>
+                <td style="color: #64748b; font-style: italic;">${escapeHtml(w.example || '')}</td>
             </tr>
         `).join('');
 
@@ -3539,13 +3327,13 @@
                                 <div class="vocab-wordlist-row" data-action="click-word-row" data-word-index="${globalIndex}">
                                     <div>
                                         <div style="display: flex; align-items: baseline; gap: 8px;">
-                                            <span style="font-weight: 700; color: #0f172a; font-size: 1.05rem;">${w.word}</span>
-                                            <span style="font-family: monospace; color: #64748b; font-size: 0.85rem;">${w.phonetic ? `/${w.phonetic}/` : ''}</span>
+                                            <span style="font-weight: 700; color: #0f172a; font-size: 1.05rem;">${escapeHtml(w.word)}</span>
+                                            <span style="font-family: monospace; color: #64748b; font-size: 0.85rem;">${w.phonetic ? `/${escapeHtml(w.phonetic)}/` : ''}</span>
                                         </div>
-                                        <div style="font-size: 0.88rem; color: #475569; margin-top: 3px; ${hideMeanings ? 'filter: blur(6px); user-select: none;' : ''}">${w.meaning || ''}</div>
+                                        <div style="font-size: 0.88rem; color: #475569; margin-top: 3px; ${hideMeanings ? 'filter: blur(6px); user-select: none;' : ''}">${escapeHtml(w.meaning || '')}</div>
                                     </div>
                                     <div style="display: flex; align-items: center; gap: 6px;">
-                                        <button type="button" class="btn btn-icon btn-ghost" data-action="play-row-audio" data-word="${w.word}" title="发音" style="color: #64748b; font-size: 1.1rem;">🔊</button>
+                                        <button type="button" class="btn btn-icon btn-ghost" data-action="play-row-audio" data-word="${escapeHtml(w.word)}" title="发音" style="color: #64748b; font-size: 1.1rem;">🔊</button>
                                     </div>
                                 </div>
                             `
@@ -3657,6 +3445,12 @@
             `;
             return;
         }
+        if (session.stage === 'batch-saving' || session.stage === 'batch-save-error') {
+            card.innerHTML = session.stage === 'batch-saving'
+                ? '<div class="vocab-card"><p>正在保存本组进度…</p></div>'
+                : '<div class="vocab-card"><p>保存未完成：' + escapeHtml(session.saveError || '请重试') + '</p><button type="button" data-action="retry-batch-save">重试保存</button></div>';
+            return;
+        }
         if (session.stage === 'batch-spelling') {
             renderBatchSpellingCard(card, session);
             return;
@@ -3703,18 +3497,12 @@
         const dot2 = passStage >= 2 ? 'is-done' : '';
 
         const safeWord = escapeHtml(word.word);
-        const phonetic = normalizePhoneticValue(word.phonetic);
+        const phonetic = escapeHtml(normalizePhoneticValue(word.phonetic));
         const safeMeaning = escapeHtml(word.meaning || '暂无释义');
         const safeExample = escapeHtml(word.example || '');
         const safeExampleCn = escapeHtml(word.exampleCn || '');
 
-        let exampleEnHtml = safeExample;
-        if (safeExample && word.word) {
-            try {
-                const regex = new RegExp(`\\b(${word.word}[a-z]*)\\b`, 'gi');
-                exampleEnHtml = safeExample.replace(regex, '<strong>$1</strong>');
-            } catch (_) {}
-        }
+        const exampleEnHtml = safeExample;
 
         const completedCount = session.completedWords?.length || 0;
         const totalCount = session.batchTotal || (completedCount + (session.activeQueue?.length || 0) + 1);
@@ -3839,13 +3627,15 @@
                     <div class="vocab-card__pronunciation">
                         <button class="vocab-card__pronounce" type="button" data-action="play-pronounce">
                             <span class="vocab-card__pronounce-icon">🔊</span>
-                            <span class="vocab-card__pronounce-label">真人英音 ${phonetic ? `/${phonetic}/` : ''}</span>
+                            <span class="vocab-card__pronounce-label">真人英音</span>
                         </button>
                         <button class="vocab-card__pronounce" type="button" data-action="open-dict-drawer" style="margin-left: 8px;">
                             <span class="vocab-card__pronounce-icon">📖</span>
                             <span class="vocab-card__pronounce-label">权威词典</span>
                         </button>
+                        <a href="https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(word.word)}" target="_blank" rel="noopener noreferrer" data-pronunciation-fallback hidden>去 Cambridge 听</a>
                     </div>
+                    ${phonetic ? `<div class="vocab-card__phonetic"><span class="visually-hidden">音标：</span><span aria-hidden="true">/</span><span>${phonetic}</span><span aria-hidden="true">/</span></div>` : ''}
                 </div>
 
                 ${bodyContentHtml}
@@ -3881,7 +3671,7 @@
                         <input type="text" class="vocab-batch-spell-input" placeholder="在此输入英文拼写…" autocomplete="off" spellcheck="false" data-field="batch-spell-input" value="${escapeHtml(session.spellingInput || '')}" autofocus />
                     </div>
 
-                    <div class="vocab-batch-spell-msg" data-field="batch-spell-feedback">${session.spellingFeedback || ''}</div>
+                    <div class="vocab-batch-spell-msg" data-field="batch-spell-feedback">${escapeHtml(session.spellingFeedback || '')}</div>
 
                     <div style="display: flex; justify-content: center; gap: 14px; margin-top: 16px;">
                         <button type="button" class="btn btn-soft" data-action="spelling-hint" style="border-radius: 999px; padding: 10px 20px;">💡 首字母提示</button>
@@ -3895,11 +3685,6 @@
         const input = card.querySelector('[data-field="batch-spell-input"]');
         if (input) {
             input.focus();
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    checkBatchSpelling();
-                }
-            });
             input.addEventListener('input', (e) => {
                 session.spellingInput = e.target.value;
             });
@@ -3942,10 +3727,8 @@
         const now = new Date();
         const dueAll = store.getDueWords(now);
         const dueSelection = preferNew ? [] : dueAll.slice(0, reviewLimit);
-        const preferredNewLimit = Number(config.dailyNew) > 0 ? Number(config.dailyNew) : DEFAULT_BATCH_SIZE;
-        const newLimit = preferNew
-            ? preferredNewLimit
-            : Math.max(reviewLimit - dueSelection.length, 0) || preferredNewLimit;
+        const preferredNewLimit = clampNumber(Number(config.dailyNew ?? DEFAULT_BATCH_SIZE), 0, CONFIG_LIMITS.dailyNew.max) ?? DEFAULT_BATCH_SIZE;
+        const newLimit = preferNew ? preferredNewLimit : 0;
         const newWords = newLimit > 0 ? store.getNewWords(newLimit) : [];
         state.session.backlog = dueSelection.concat(newWords).map((word) => ({ ...word }));
         state.session.dueTotal = dueSelection.length;
@@ -3960,6 +3743,8 @@
 
     function startReviewFlow(options = {}) {
         const { preferNew = false } = options;
+        state.ui.sessionVisible = true;
+        state.session.currentMode = preferNew ? 'learn' : 'review';
         prepareSessionQueue({ preferNew });
         showDueBanner(state.session.duePending);
         state.ui.sidePanelManual = null;
@@ -3972,6 +3757,7 @@
     }
 
     function render() {
+        updateStudyVisibility();
         renderCard();
         updateProgressStats();
         updateSidePanelContent(state.session.currentWord);
@@ -4043,6 +3829,7 @@
     }
 
     function startSelectedMode(mode) {
+        pauseVocabStudyTime();
         const preferNew = mode === 'learn';
         const checkpoint = loadSessionCheckpoint();
         const mainBody = state.container?.querySelector('[data-vocab-role="main"]');
@@ -4050,7 +3837,7 @@
         const topProgress = state.container?.querySelector('[data-vocab-role="progress"]');
 
         state.session.currentMode = mode;
-        sessionActiveStartTime = Date.now();
+        state.ui.sessionVisible = false;
 
         if (mode === 'review') {
             const dueWords = state.store?.getDueWords ? state.store.getDueWords() : [];
@@ -4061,9 +3848,22 @@
             }
         }
 
-        if (checkpoint && (!checkpoint.mode || checkpoint.mode === mode)) {
+        if (checkpoint && (!checkpoint.mode || checkpoint.mode === mode)
+            && (checkpoint.listId || 'default') === (state.store?.getActiveListId?.() || 'default')) {
             try {
                 Object.assign(state.session, checkpoint);
+                state.session.finishing = false;
+                state.session.spellingAdvancing = false;
+                state.session.markingFamiliar = false;
+                state.session.sessionId = checkpoint.sessionId || String(Date.now());
+                if (state.session.stage === 'batch-saving') state.session.stage = 'batch-save-error';
+                if (checkpoint.stage === 'batch-spelling' && !checkpoint.spellingResults) {
+                    state.session.spellingIndex = 0;
+                    state.session.spellingInput = '';
+                    showFeedbackMessage('旧版断点没有拼写评分记录，将从本组拼写第一词继续。', 'info');
+                }
+                state.session.spellingResults ||= {};
+                state.session.recognitionResults ||= {};
                 // 确保所有词汇和队列数据全部被 normalizeWord 彻底规范化！
                 if (state.session.currentWordItem) {
                     const nw = normalizeWord(state.session.currentWordItem.word || state.session.currentWordItem);
@@ -4095,14 +3895,16 @@
                     state.session.spellingWords = state.session.spellingWords.map(w => normalizeWord(w)).filter(Boolean);
                 }
 
-                if ((state.session.currentWord && state.session.currentWord.word) || state.session.stage === 'batch-spelling' || state.session.stage === 'batch-summary') {
-                    state.session.subStage = 'testing';
+                if ((state.session.currentWord && state.session.currentWord.word) || state.session.stage === 'batch-spelling' || ['batch-summary', 'batch-save-error'].includes(state.session.stage)) {
+                    state.ui.sessionVisible = true;
+                    state.session.subStage = checkpoint.subStage || 'testing';
                     state.session.meaningVisible = false;
 
                     if (modeDash) modeDash.setAttribute('hidden', 'hidden');
                     if (mainBody) mainBody.removeAttribute('hidden');
                     if (topProgress) topProgress.setAttribute('hidden', 'hidden');
                     render();
+                    resumeVocabStudyTime();
                     return;
                 }
             } catch (err) {
@@ -4127,6 +3929,8 @@
         }
         document.body?.classList.add('vocab-focus-active');
         target.removeAttribute('hidden');
+        pauseVocabStudyTime();
+        state.ui.sessionVisible = false;
         state.container = target;
         if (!state.initialized) {
             createLayout(target);

@@ -5,7 +5,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>考试总览系统</title>
+        <title>IELTS Atlas</title>
         <link
             rel="icon"
             type="image/svg+xml"
@@ -13,17 +13,21 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
         />
         <link rel="stylesheet" href="css/main.css" />
         <link rel="stylesheet" href="css/heroui-bridge.css" />
+        <link rel="stylesheet" href="css/theme-switcher-scroll.css" />
         <link rel="stylesheet" href="css/onboarding.css" />
+        <link rel="stylesheet" href="css/account-sync.css?v=20260902_2" />
     </head>
 
     <body class="hero-body boot-active" data-theme="heroui">
         <!-- NewJeans Theme Background -->
         <div class="newjeans-bg-container" aria-hidden="true"></div>
+        <!-- ASCII Flower Background -->
+        <div class="ascii-bg-container" aria-hidden="true"></div>
         <div id="boot-overlay" role="status" aria-live="polite">
             <div class="boot-panel">
                 <div class="boot-logo">SHUI · IELTS</div>
                 <p class="boot-status" id="boot-status-text">
-                    正在唤醒考试总览系统...
+                    正在唤醒 IELTS Atlas...
                 </p>
                 <div class="boot-progress">
                     <span
@@ -40,38 +44,25 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             type="file"
             id="folder-picker"
             webkitdirectory
-            style="display: none"
         />
         <div class="message-container" id="message-container"></div>
 
         <div class="container hero-shell">
             <div class="hero-header">
-                <h1 style="width: 100%">
-                    📚 考试总览系统
-                    <span
-                        style="
-                            font-size: 0.35em;
-                            opacity: 0.6;
-                            font-weight: normal;
-                            margin-left: 12px;
-                            vertical-align: middle;
-                            display: inline-block;
-                        "
+                <h1 class="hero-brand-title" aria-label="IELTS Atlas">
+                    <span class="hero-brand-mark" aria-hidden="true">
+                        <img src="assets/images/logo.svg" alt="IELTS Atlas Logo" style="width: 80%; height: 80%; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(15, 23, 42, 0.08));">
+
+                    </span>
+                    <span class="hero-brand-text">IELTS Atlas</span>
+                    <span class="hero-brand-subtitle"
                         >社区学习改版 · zhangfw0516-oss 维护</span
                     >
                     <a
                         href="https://github.com/zhangfw0516-oss/IELTS-practice"
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="hero-badge hero-badge--cta"
-                        style="
-                            background: #245f78;
-                            box-shadow: 0 12px 30px rgba(36, 95, 120, 0.28);
-                            text-decoration: none;
-                            display: inline-flex;
-                            align-items: center;
-                            justify-content: center;
-                        "
+                        class="hero-badge hero-badge--cta hero-badge--remix"
                         aria-label="查看 zhangfw0516-oss 维护的改版源码"
                     >
                         改版源码
@@ -82,14 +73,6 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                         rel="noopener noreferrer"
                         class="inline-hover-link"
                         aria-label="GitHub 改版仓库"
-                        style="
-                            margin-left: auto;
-                            margin-right: 20px;
-                            color: inherit;
-                            display: flex;
-                            align-items: center;
-                            transition: opacity 0.2s;
-                        "
                     >
                         <svg
                             viewBox="0 0 24 24"
@@ -129,7 +112,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                     type="button"
                     data-view="practice"
                 >
-                    📝 练习记录
+                    📝 学习记录
                 </button>
                 <button
                     class="nav-btn hero-nav__btn"
@@ -150,7 +133,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             <!-- 总览页面 -->
             <div id="overview-view" class="view active hero-panel hero-section">
                 <div class="hero-panel__header">
-                    <h2 class="hero-panel__title" style="margin: 0;">📊 学习总览</h2>
+                    <h2 class="hero-panel__title">📊 学习总览</h2>
                 </div>
 
                 <div class="category-grid" id="category-overview">
@@ -174,7 +157,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                             aria-hidden="true"
                         ></span>
                     </button>
-                    <h2 id="browse-title" class="hero-panel__title" style="margin: 0;">题库浏览</h2>
+                    <h2 id="browse-title" class="hero-panel__title">题库浏览</h2>
                     <button
                         id="reading-memorize-exit-btn"
                         class="reading-memorize-exit-btn"
@@ -228,6 +211,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                             class="shui-segmented-btn"
                             type="button"
                             aria-pressed="false"
+                            hidden
                             data-filter-type="listening"
                             data-index-action="filter-exams"
                             data-action-value="listening"
@@ -349,34 +333,356 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                 </div>
             </div>
 
-            <!-- 练习记录页面 -->
+            <!-- 学习记录页面 -->
             <div id="practice-view" class="view hero-panel hero-section">
-                <div class="hero-panel__header">
-                    <h2 class="hero-panel__title" style="margin: 0;">📝 练习记录</h2>
+                <div class="hero-panel__header practice-view__header">
+                    <div class="practice-view__title-row">
+                        <h2 class="hero-panel__title">📝 学习记录</h2>
+                        <button
+                            id="practice-summary-toggle"
+                            class="practice-summary-toggle"
+                            type="button"
+                            data-index-action="toggle-practice-summary"
+                            aria-controls="practice-summary-region"
+                            aria-expanded="true"
+                            aria-label="折叠学习统计卡片"
+                        >
+                            <span class="practice-summary-toggle__glyph" aria-hidden="true"></span>
+                        </button>
+                    </div>
                 </div>
 
-                <div class="practice-stats hero-grid hero-grid--stats">
-                    <div class="hero-card hero-card--stat">
-                        <div class="hero-card__label">已练习题目</div>
-                        <div class="hero-card__value" id="total-practiced">
-                            0
+                <div id="practice-summary-region" class="practice-summary-region">
+                    <div class="practice-stats hero-grid hero-grid--stats">
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">已练习题目</div>
+                            <div class="hero-card__value" id="total-practiced">0</div>
+                            <div class="hero-card__meta">累计巩固练习</div>
                         </div>
-                        <div class="hero-card__meta">累计巩固练习</div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">平均正确率</div>
+                            <div class="hero-card__value" id="avg-score">0%</div>
+                            <div class="hero-card__meta">近期待练表现</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">学习时长(分钟)</div>
+                            <div class="hero-card__value" id="study-time">0</div>
+                            <div class="hero-card__meta">做题 + 背词总计</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">连续学习天数</div>
+                            <div class="hero-card__value" id="streak-days">0</div>
+                            <div class="hero-card__meta">坚持天数</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">今日背词&复习</div>
+                            <div class="hero-card__value" id="today-vocab-words">0</div>
+                            <div class="hero-card__meta">今日学习词数</div>
+                        </div>
+                        <div class="hero-card hero-card--stat">
+                            <div class="hero-card__label">累计掌握词汇</div>
+                            <div class="hero-card__value" id="total-vocab-words">0</div>
+                            <div class="hero-card__meta">核心词库储备</div>
+                        </div>
                     </div>
-                    <div class="hero-card hero-card--stat">
-                        <div class="hero-card__label">平均正确率</div>
-                        <div class="hero-card__value" id="avg-score">0%</div>
-                        <div class="hero-card__meta">近期待练表现</div>
-                    </div>
-                    <div class="hero-card hero-card--stat">
-                        <div class="hero-card__label">学习时长(分钟)</div>
-                        <div class="hero-card__value" id="study-time">0</div>
-                        <div class="hero-card__meta">聚焦沉浸时长</div>
-                    </div>
-                    <div class="hero-card hero-card--stat">
-                        <div class="hero-card__label">连续学习天数</div>
-                        <div class="hero-card__value" id="streak-days">0</div>
-                        <div class="hero-card__meta">坚持天数</div>
+
+                    <div class="practice-insights-grid">
+                        <section
+                            id="practice-trend-card"
+                            class="practice-trend-card"
+                            role="button"
+                            tabindex="0"
+                            aria-label="打开练习趋势筛选范围"
+                            aria-pressed="false"
+                        >
+                            <div class="practice-trend-card__rotor">
+                                <div class="practice-trend-card__face practice-trend-card__front">
+                                    <div class="practice-trend-card__header">
+                                        <div class="practice-trend-card__title-line">
+                                            <div>
+                                                <h3 class="practice-trend-card__title">练习趋势</h3>
+                                            </div>
+                                            <div class="practice-trend-card__metrics">
+                                                <div>
+                                                    <span class="practice-trend-card__metric-value" id="practice-trend-count">0</span>
+                                                    <span class="practice-trend-card__metric-label">记录</span>
+                                                </div>
+                                                <div>
+                                                    <span class="practice-trend-card__metric-value" id="practice-trend-average">0%</span>
+                                                    <span class="practice-trend-card__metric-label">均值</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="practice-trend-card__range" id="practice-trend-range-label">
+                                            最近十次
+                                        </div>
+                                    </div>
+                                    <div class="practice-trend-chart-shell">
+                                        <canvas id="practice-trend-canvas" aria-hidden="true"></canvas>
+                                        <div id="practice-trend-empty" class="practice-trend-empty">
+                                            暂无趋势数据
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="practice-trend-card__face practice-trend-card__back">
+                                    <div class="practice-trend-card__header">
+                                        <div>
+                                            <p class="practice-trend-card__eyebrow">Range</p>
+                                            <h3 class="practice-trend-card__title">筛选范围</h3>
+                                        </div>
+                                    </div>
+                                    <div class="practice-trend-options" aria-label="练习趋势筛选范围">
+                                        <button
+                                            class="practice-trend-option active"
+                                            type="button"
+                                            data-practice-trend-range="recent10"
+                                            aria-pressed="true"
+                                        >
+                                            最近十次
+                                        </button>
+                                        <button
+                                            class="practice-trend-option"
+                                            type="button"
+                                            data-practice-trend-range="last7d"
+                                            aria-pressed="false"
+                                        >
+                                            最近七天
+                                        </button>
+                                        <button
+                                            class="practice-trend-option"
+                                            type="button"
+                                            data-practice-trend-range="last30d"
+                                            aria-pressed="false"
+                                        >
+                                            最近一月
+                                        </button>
+                                        <button
+                                            class="practice-trend-option"
+                                            type="button"
+                                            data-practice-trend-range="recent20"
+                                            aria-pressed="false"
+                                        >
+                                            最近20次
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                        <section
+                            id="practice-custom-card"
+                            class="practice-custom-card"
+                        >
+                            <div class="practice-custom-card__rotor">
+                                <div class="practice-trend-card__face practice-custom-card__front">
+                                    <div class="practice-trend-card__header">
+                                        <div>
+                                            <h3 class="practice-trend-card__title" id="practice-custom-card-title">练习热力图</h3>
+                                        </div>
+                                        <div class="practice-custom-card__header-actions">
+                                            <div
+                                                class="practice-heatmap-month-controls"
+                                                id="practice-heatmap-month-controls"
+                                                aria-label="切换热力图月份"
+                                            >
+                                                <button
+                                                    class="practice-custom-card__icon-btn"
+                                                    type="button"
+                                                    data-practice-heatmap-month="prev"
+                                                    aria-label="查看上个月"
+                                                    title="上个月"
+                                                >
+                                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="m15 18-6-6 6-6"></path>
+                                                    </svg>
+                                                </button>
+                                                <span
+                                                    class="practice-heatmap-month-label"
+                                                    id="practice-heatmap-month-label"
+                                                    aria-live="polite"
+                                                >本月</span>
+                                                <button
+                                                    class="practice-custom-card__icon-btn"
+                                                    type="button"
+                                                    data-practice-heatmap-month="next"
+                                                    aria-label="查看下个月"
+                                                    title="下个月"
+                                                >
+                                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="m9 18 6-6-6-6"></path>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                            <button
+                                                class="practice-custom-card__flip-btn practice-custom-card__icon-btn"
+                                                type="button"
+                                                aria-label="配置自定义组件"
+                                                title="配置自定义组件"
+                                            >
+                                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"></path>
+                                                    <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+                                                    <path d="M12 2v2"></path>
+                                                    <path d="M12 20v2"></path>
+                                                    <path d="m4.93 4.93 1.41 1.41"></path>
+                                                    <path d="m17.66 17.66 1.41 1.41"></path>
+                                                    <path d="M2 12h2"></path>
+                                                    <path d="M20 12h2"></path>
+                                                    <path d="m6.34 17.66-1.41 1.41"></path>
+                                                    <path d="m19.07 4.93-1.41 1.41"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="practice-custom-widget-content" data-widget-type="heatmap">
+                                        <div class="practice-heatmap" id="practice-heatmap" aria-label="练习活动热力图"></div>
+                                        <div class="practice-heatmap__footer">
+                                            <span id="practice-heatmap-summary">本月暂无练习记录</span>
+                                            <div class="practice-heatmap__legend" aria-label="做题量颜色图例">
+                                                <span>少</span>
+                                                <i class="practice-heatmap__legend-cell practice-heatmap__legend-cell--0"></i>
+                                                <i class="practice-heatmap__legend-cell practice-heatmap__legend-cell--1"></i>
+                                                <i class="practice-heatmap__legend-cell practice-heatmap__legend-cell--2"></i>
+                                                <i class="practice-heatmap__legend-cell practice-heatmap__legend-cell--3"></i>
+                                                <i class="practice-heatmap__legend-cell practice-heatmap__legend-cell--4"></i>
+                                                <span>多</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="practice-custom-widget-content" data-widget-type="priority" hidden>
+                                    <div class="priority-progress-stack" aria-label="中高频练习进度">
+                                        <div class="priority-progress priority-progress--high">
+                                            <div class="priority-progress__head">
+                                                <span>高频</span>
+                                                <strong id="practice-priority-high-count">0/0</strong>
+                                            </div>
+                                            <div class="priority-progress__track" aria-hidden="true">
+                                                <span
+                                                    class="priority-progress__fill"
+                                                    id="practice-priority-high-fill"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <div class="priority-progress priority-progress--medium">
+                                            <div class="priority-progress__head">
+                                                <span>中频</span>
+                                                <strong id="practice-priority-medium-count">0/0</strong>
+                                            </div>
+                                            <div class="priority-progress__track" aria-hidden="true">
+                                                <span
+                                                    class="priority-progress__fill"
+                                                    id="practice-priority-medium-fill"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="priority-accuracy" aria-label="中高频正确率">
+                                        <div class="priority-accuracy__orb priority-accuracy__orb--high">
+                                            <span id="practice-priority-high-accuracy">0%</span>
+                                            <small>高频正确率</small>
+                                        </div>
+                                        <div class="priority-accuracy__orb priority-accuracy__orb--medium">
+                                            <span id="practice-priority-medium-accuracy">0%</span>
+                                            <small>中频正确率</small>
+                                        </div>
+                                    </div>
+                                    </div>
+                                    <div class="practice-custom-widget-content" data-widget-type="radar" hidden>
+                                        <div class="practice-radar-chart-shell">
+                                            <canvas id="practice-radar-canvas" aria-hidden="true"></canvas>
+                                            <div id="practice-radar-empty" class="practice-trend-empty">
+                                                暂无阅读错题数据
+                                            </div>
+                                        </div>
+                                        <p class="practice-radar-summary" id="practice-radar-summary">
+                                            最近10次阅读错题题型分布
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="practice-trend-card__face practice-trend-card__back practice-custom-card__back">
+                                    <div class="practice-trend-card__header">
+                                        <div>
+                                            <p class="practice-trend-card__eyebrow">Widgets</p>
+                                            <h3 class="practice-trend-card__title">自定义组件</h3>
+                                        </div>
+                                        <div class="practice-custom-card__header-actions">
+                                            <button
+                                                class="practice-custom-card__flip-btn practice-custom-card__icon-btn"
+                                                type="button"
+                                                aria-label="关闭自定义练习组件选择"
+                                                title="关闭自定义练习组件选择"
+                                            >
+                                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="practice-custom-options" aria-label="自定义练习组件">
+                                        <button
+                                            class="practice-custom-option active"
+                                            type="button"
+                                            data-practice-widget="heatmap"
+                                            aria-pressed="true"
+                                        >
+                                            <span class="practice-custom-option__icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+                                                    <path d="M8 2v4"></path>
+                                                    <path d="M16 2v4"></path>
+                                                    <path d="M3 10h18"></path>
+                                                    <path d="M8 14h.01"></path>
+                                                    <path d="M12 14h.01"></path>
+                                                    <path d="M16 14h.01"></path>
+                                                    <path d="M8 17h.01"></path>
+                                                </svg>
+                                            </span>
+                                            <span class="practice-custom-option__body">
+                                                <strong>练习热力图</strong>
+                                            </span>
+                                            <span class="practice-custom-option__check" aria-hidden="true"></span>
+                                        </button>
+                                        <button
+                                            class="practice-custom-option"
+                                            type="button"
+                                            data-practice-widget="priority"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="practice-custom-option__icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M4 20V10"></path>
+                                                    <path d="M10 20V4"></path>
+                                                    <path d="M16 20v-7"></path>
+                                                    <path d="M22 20H2"></path>
+                                                </svg>
+                                            </span>
+                                            <span class="practice-custom-option__body">
+                                                <strong>中高频余量</strong>
+                                            </span>
+                                            <span class="practice-custom-option__check" aria-hidden="true"></span>
+                                        </button>
+                                        <button
+                                            class="practice-custom-option"
+                                            type="button"
+                                            data-practice-widget="radar"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="practice-custom-option__icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M12 3 3 8l9 5 9-5-9-5Z"></path>
+                                                    <path d="m3 8 9 13 9-13"></path>
+                                                    <path d="M12 13v8"></path>
+                                                </svg>
+                                            </span>
+                                            <span class="practice-custom-option__body">
+                                                <strong>阅读错题雷达</strong>
+                                            </span>
+                                            <span class="practice-custom-option__check" aria-hidden="true"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 </div>
 
@@ -462,18 +768,12 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                         </div>
                     </div>
                     <div id="history-list" class="practice-history-list">
-                        <div
-                            style="
-                                text-align: center;
-                                padding: 40px;
-                                opacity: 0.7;
-                            "
-                        >
-                            <div style="font-size: 3em; margin-bottom: 15px">
+                        <div class="history-empty-placeholder">
+                            <div class="history-empty-placeholder__icon">
                                 📋
                             </div>
                             <p>暂无练习记录</p>
-                            <p style="font-size: 0.9em; margin-top: 10px">
+                            <p class="history-empty-placeholder__note">
                                 开始练习后，记录将自动保存在这里
                             </p>
                         </div>
@@ -484,7 +784,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             <!-- 设置页面 -->
             <div id="settings-view" class="view hero-panel hero-section">
                 <div class="hero-panel__header">
-                    <h2 class="hero-panel__title" style="margin: 0;">⚙️ 系统设置</h2>
+                    <h2 class="hero-panel__title">⚙️ 系统设置</h2>
                 </div>
                 <div class="hero-settings-group">
                     <div
@@ -494,10 +794,11 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                         <p class="hero-panel__muted">系统工具和设置选项</p>
                         <div class="hero-settings-actions">
                             <button
+                                type="button"
                                 class="btn btn-warning"
                                 id="clear-cache-btn"
                             >
-                                🗑️ 清除缓存
+                                🗑️ 清理数据
                             </button>
                             <button
                                 class="btn btn-warning"
@@ -568,26 +869,33 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                     <div class="hero-panel hero-section data-management-panel">
                         <h3>💾 数据管理</h3>
                         <p class="hero-panel__muted">
-                            数据备份、导入导出和完整性检查
+                            本地磁盘备份（推荐）、应用内快照、导入与导出。清理浏览器站点数据不会删除已写入磁盘的备份文件。
                         </p>
                         <div class="hero-settings-actions">
                             <button
                                 class="btn data-mgmt-btn"
+                                id="external-backup-entry-btn"
+                                type="button"
+                            >
+                                📁 本地磁盘备份
+                            </button>
+                            <button
+                                class="btn data-mgmt-btn"
                                 id="create-backup-btn"
                             >
-                                💾 创建备份
+                                💾 创建应用内备份
                             </button>
                             <button
                                 class="btn data-mgmt-btn"
                                 id="backup-list-btn"
                             >
-                                📋 备份列表
+                                📋 应用内备份列表
                             </button>
                             <button
                                 class="btn data-mgmt-btn"
                                 id="export-data-btn"
                             >
-                                📤 导出数据
+                                📤 导出到下载
                             </button>
                             <button
                                 class="btn data-mgmt-btn"
@@ -600,71 +908,54 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
 
                     <div class="hero-panel hero-section">
                         <h3>📊 系统信息</h3>
-                        <div
-                            class="hero-surface"
-                            style="
-                                margin-top: 15px;
-                                line-height: 1.8;
-                                font-weight: bold;
-                            "
-                        >
-                            <div style="color: #10b981">
+                        <div class="hero-surface settings-system-info">
+                            <div class="settings-system-info__status">
                                 题库状态: 已加载完整索引
                             </div>
                             <div>
-                                题目总数: <span id="total-exams">192</span>
+                                题目总数: <span id="total-exams">234</span>
                             </div>
                             <div>
-                                HTML题目: <span id="html-exams">191</span>
+                                HTML题目: <span id="html-exams">232</span>
                             </div>
-                            <div>PDF题目: <span id="pdf-exams">190</span></div>
+                            <div>PDF题目: <span id="pdf-exams">207</span></div>
                             <div>
                                 最后更新:
                                 <span id="last-update"
-                                    >2025/05/06 21:56:46</span
+                                    >2026/08/07 21:12:40</span
                                 >
                             </div>
                         </div>
 
                         <!-- 开发团队链接 -->
-                        <div
-                            style="
-                                margin-top: 30px;
-                                text-align: center;
-                                padding-top: 20px;
-                                border-top: 1px solid rgba(255, 255, 255, 0.2);
-                            "
-                        >
+                        <div class="settings-footer">
                             <a
                                 href="https://docs.qq.com/doc/DSXZhWUtqeVN0d1ZT"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                class="inline-hover-link"
-                                style="
-                                    color: #ff1c1c;
-                                    text-decoration: none;
-                                    font-size: 0.9em;
-                                    font-weight: bold;
-                                    display: block;
-                                    margin-bottom: 12px;
-                                    transition: opacity 0.2s;
-                                "
+                                class="inline-hover-link settings-footer__feedback"
                             >
                                 问题反馈
                             </a>
-                            <a
-                                href="https://github.com/zhangfw0516-oss/IELTS-practice"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style="
-                                    color: gray;
-                                    text-decoration: none;
-                                    font-size: 0.9em;
-                                    transition: color 0.3s ease;
-                                "
-                            >
-                                改版维护 · zhangfw0516-oss
-                            </a>
+                            <div class="settings-footer__credits" aria-label="项目制作与改版信息">
+                                <a
+                                    href="https://github.com/zhangfw0516-oss/IELTS-practice"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="settings-footer__author settings-footer__author--maintainer"
+                                >
+                                    改版维护 · zhangfw0516-oss
+                                </a>
+                                <span aria-hidden="true">·</span>
+                                <a
+                                    href="https://github.com/sallowayma-git/IELTS-practice"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="settings-footer__author"
+                                >
+                                    原项目 · sallowayma-git
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -673,7 +964,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
             <!-- 更多页面 -->
             <div id="more-view" class="view hero-panel hero-section">
                 <div class="hero-panel__header">
-                    <h2 class="hero-panel__title" style="margin: 0;">✨ 更多工具</h2>
+                    <h2 class="hero-panel__title">✨ 更多工具</h2>
                 </div>
                 <p class="more-view-subtitle">
                     探索额外的学习辅助功能，助你高效备考。
@@ -702,6 +993,18 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                         <div class="tool-card-content">
                             <h3>单词背诵</h3>
                             <p>SM-2记忆算法，随时继续你的词汇任务。</p>
+                        </div>
+                        <div class="tool-card-arrow">进入</div>
+                    </button>
+                    <button
+                        class="tool-card"
+                        type="button"
+                        data-action="open-reading-memorize"
+                    >
+                        <div class="tool-card-icon">🧩</div>
+                        <div class="tool-card-content">
+                            <h3>阅读背题</h3>
+                            <p>复用统一阅读页，查看答案、解析与定位高亮，并可切换测试。</p>
                         </div>
                         <div class="tool-card-arrow">进入</div>
                     </button>
@@ -878,7 +1181,33 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                 </div>
                 <div class="theme-modal-body">
                     <div class="theme-options-viewport" role="presentation">
-                        <div class="theme-options-glass">
+                        <button
+                            class="theme-scroll-btn theme-scroll-btn-prev"
+                            type="button"
+                            data-theme-scroll="prev"
+                            aria-label="向左滚动主题列表"
+                            aria-controls="theme-options-scroller"
+                        >
+                            <svg
+                                class="theme-scroll-btn__glyph"
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                                focusable="false"
+                            >
+                                <path
+                                    d="M15 6 L9 12 L15 18"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                        </button>
+                        <div
+                            class="theme-options-glass"
+                            id="theme-options-scroller"
+                        >
                             <!-- 晨雾群山 -->
                             <div class="theme-card">
                                 <div class="theme-card-bg theme-bg-misty"></div>
@@ -888,8 +1217,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                             晨雾群山
                                         </h4>
                                         <div class="theme-card-subtitle">
-                                            <span style="opacity: 0.6"
-                                                >⛰️ Misty Mountain</span
+                                            <span>⛰️ Misty Mountain</span
                                             >
                                         </div>
                                     </div>
@@ -914,8 +1242,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                             深海孤航
                                         </h4>
                                         <div class="theme-card-subtitle">
-                                            <span style="opacity: 0.6"
-                                                >⛵ Teal Ocean</span
+                                            <span>⛵ Teal Ocean</span
                                             >
                                         </div>
                                     </div>
@@ -942,8 +1269,7 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                             落日雾花
                                         </h4>
                                         <div class="theme-card-subtitle">
-                                            <span style="opacity: 0.6"
-                                                >🌸 Floral Bloom</span
+                                            <span>🌸 Floral Bloom</span
                                             >
                                         </div>
                                     </div>
@@ -975,14 +1301,76 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                                         <button
                                             class="theme-card-btn"
                                             data-index-action="switch-bg-theme"
-                                            data-action-value="newjeans"
-                                        >
-                                            应用
-                                        </button>
-                                    </div>
+                                            data-action-value="newjeans" > 应用 </button> </div> </div> </div>
+                            <!-- 墨染字花 -->
+                            <div class="theme-card">
+                                <div class="theme-card-bg theme-bg-ascii"></div>
+                                <div class="theme-preview-ascii" aria-hidden="true">
+                                    <svg class="ink-flower" viewBox="0 0 120 150" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                                        <defs>
+                                            <linearGradient id="inkGrad" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#fafafa" stop-opacity="0.95" />
+                                                <stop offset="55%" stop-color="#d4d4d8" stop-opacity="0.75" />
+                                                <stop offset="100%" stop-color="#52525b" stop-opacity="0.55" />
+                                            </linearGradient>
+                                            <linearGradient id="stemGrad" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#a1a1aa" stop-opacity="0.9" />
+                                                <stop offset="100%" stop-color="#3f3f46" stop-opacity="0.7" />
+                                            </linearGradient>
+                                            <filter id="inkGlow" x="-50%" y="-50%" width="200%" height="200%">
+                                                <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#e4e4e7" flood-opacity="0.55" />
+                                            </filter>
+                                            <filter id="inkBleed" x="-60%" y="-60%" width="220%" height="220%">
+                                                <feGaussianBlur stdDeviation="4" />
+                                            </filter>
+                                        </defs>
+                                        <path filter="url(#inkBleed)" fill="url(#inkGrad)" opacity="0.22" d="M 40 36 C 33 54, 36 74, 47 81 C 54 86, 66 86, 73 81 C 84 74, 87 54, 80 36 C 72 30, 64 34, 60 38 C 56 34, 48 30, 40 36 Z" />
+                                        <path d="M 60 80 C 60 100, 58 118, 60 138" fill="none" stroke="url(#stemGrad)" stroke-width="2.4" stroke-linecap="round" />
+                                        <path d="M 60 112 C 44 108, 34 120, 38 134 C 52 130, 58 122, 60 114 Z" fill="url(#stemGrad)" opacity="0.7" stroke="#a1a1aa" stroke-width="1" stroke-opacity="0.5" />
+                                        <path d="M 60 122 C 76 118, 86 130, 82 144 C 68 140, 62 132, 60 124 Z" fill="url(#stemGrad)" opacity="0.7" stroke="#a1a1aa" stroke-width="1" stroke-opacity="0.5" />
+                                        <path filter="url(#inkGlow)" fill="url(#inkGrad)" stroke="#f4f4f5" stroke-width="1.5" stroke-opacity="0.85" d="M 40 36 C 33 54, 36 74, 47 81 C 54 86, 66 86, 73 81 C 84 74, 87 54, 80 36 C 72 30, 64 34, 60 38 C 56 34, 48 30, 40 36 Z" />
+                                        <path d="M 60 38 C 56 52, 54 68, 56 80" fill="none" stroke="#f4f4f5" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round" />
+                                        <path d="M 60 38 C 64 52, 66 68, 64 80" fill="none" stroke="#f4f4f5" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round" />
+                                        <path d="M 60 38 C 60 55, 60 68, 60 80" fill="none" stroke="#f4f4f5" stroke-width="1.2" stroke-opacity="0.45" stroke-linecap="round" />
+                                    </svg>
                                 </div>
-                            </div>
+                                <div class="theme-card-glass-layer">
+                                    <div class="theme-card-header">
+                                        <h4 class="theme-card-title">墨染字花</h4>
+                                        <div class="theme-card-subtitle">
+                                            <span>🌷 Ink Bloom</span>
+                                        </div>
+                                    </div>
+                                    <div class="theme-card-footer">
+                                        <span class="theme-card-tag">静态</span>
+                                        <button
+                                            class="theme-card-btn"
+                                            data-index-action="switch-bg-theme"
+                                            data-action-value="ascii-flower" > 应用 </button> </div> </div> </div>
                         </div>
+                        <button
+                            class="theme-scroll-btn theme-scroll-btn-next"
+                            type="button"
+                            data-theme-scroll="next"
+                            aria-label="向右滚动主题列表"
+                            aria-controls="theme-options-scroller"
+                        >
+                            <svg
+                                class="theme-scroll-btn__glyph"
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                                focusable="false"
+                            >
+                                <path
+                                    d="M15 6 L9 12 L15 18"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -990,20 +1378,29 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
 
         <!-- 启动与懒加载工具 -->
         <script src="assets/vendor/three.min.js"></script>
-        <script src="js/bundles/runtime-entry.bundle.js"></script>
+        <script src="js/bundles/runtime-entry.bundle.js?v=20260903_1"></script>
 
         <!-- 基础环境与日志 -->
-        <script src="js/bundles/core-foundation.bundle.js"></script>
+        <script src="js/bundles/core-foundation.bundle.js?v=20260903_1"></script>
 
         <!-- 工具库与基础视图 -->
-        <script src="js/bundles/ui-shell.bundle.js"></script>
+        <script src="js/bundles/ui-shell.bundle.js?v=20260903_1"></script>
 
         <!-- 入口与懒加载代理 -->
-        <script src="js/bundles/legacy-app.bundle.js"></script>
+        <script src="js/bundles/legacy-app.bundle.js?v=20260903_1"></script>
+
+        <!-- Firebase 与多端云同步系统 -->
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+        <script src="js/config/firebaseConfig.js?v=20260903_1"></script>
+        <script src="js/core/cloudSyncService.js?v=20260903_1"></script>
+        <script src="js/components/accountModal.js?v=20260903_1"></script>
+        <script src="js/services/studyStatsManager.js?v=20260903_1"></script>
 
         <!-- 成就系统模态框 -->
         <div id="achievements-modal" class="theme-modal">
-            <div class="theme-modal-content" style="max-width: 600px">
+            <div class="theme-modal-content achievements-modal-content">
                 <div class="theme-modal-header">
                     <h3>🏆 我的成就</h3>
                     <button
@@ -1052,7 +1449,6 @@ window.__APP_INDEX_HTML_SNAPSHOT__ = `<!doctype html>
                             target="_blank"
                             rel="noopener noreferrer"
                             class="lm-warning"
-                            style="text-decoration: underline"
                             >问题反馈</a
                         >
                     </p>

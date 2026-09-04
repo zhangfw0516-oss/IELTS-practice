@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [opensource]
+    branches: [opensource, main]
   push:
-    branches: [opensource]
+    branches: [opensource, main]
 
 permissions:
   contents: read

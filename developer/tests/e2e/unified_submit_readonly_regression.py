@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+from browser_launch import chromium_launch_options
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 UNIFIED_HTML = REPO_ROOT / "assets" / "generated" / "reading-exams" / "reading-practice-unified.html"
 HOST_FIXTURE = REPO_ROOT / "developer" / "tests" / "e2e" / "fixtures" / "index.html"
@@ -371,7 +373,11 @@ async def run_timeout_scenario(context) -> Dict[str, Any]:
 
 async def run() -> Dict[str, Any]:
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True, args=["--allow-file-access-from-files"])
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
+        )
         context = await browser.new_context(viewport={"width": 1440, "height": 1000})
         await context.add_init_script(script="window.__IELTS_READING_PAGE_TEST_HOOKS__ = true;")
         try:

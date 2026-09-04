@@ -2,6 +2,7 @@
 """Single reading flow E2E: verify main communication path and no fallback/synthetic save."""
 
 from __future__ import annotations
+from browser_launch import chromium_launch_options
 
 import asyncio
 import json
@@ -87,9 +88,10 @@ async def _launch_chromium(p) -> Browser:
         return await p.chromium.launch(
             headless=True,
             args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
         )
     except Exception:
-        return await p.chromium.launch(headless=True)
+        return await p.chromium.launch(headless=True, **chromium_launch_options())
 
 
 async def _ensure_app_ready(page: Page) -> None:

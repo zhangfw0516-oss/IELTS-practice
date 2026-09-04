@@ -5,6 +5,7 @@ E2E测试：听力练习完整流程
 """
 
 from __future__ import annotations
+from browser_launch import chromium_launch_options
 
 import asyncio
 import json
@@ -678,7 +679,7 @@ async def run() -> bool:
     all_passed = False
     try:
         async with async_playwright() as p:
-            browser: Browser = await p.chromium.launch(headless=True)
+            browser: Browser = await p.chromium.launch(headless=True, **chromium_launch_options())
             
             # 测试1: 完整练习流程
             try:

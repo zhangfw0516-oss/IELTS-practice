@@ -45,6 +45,7 @@ developer/tests/e2e/reports/static-ci-report.json
 # 忽略 E2E 运行产物
 developer/tests/e2e/.pw-browsers/
 developer/tests/e2e/__pycache__/
+developer/tests/ci/__pycache__/
 developer/tests/e2e/reports/
 developer/tests/e2e/reports/suite-practice-flow-report.json
 developer/tests/e2e/reports/*.png

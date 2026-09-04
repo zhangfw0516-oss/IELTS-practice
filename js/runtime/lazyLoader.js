@@ -15,7 +15,9 @@
     function resolveAssetVersion() {
         try {
             var params = new URLSearchParams(global.location && global.location.search ? global.location.search : '');
-            return String(params.get('v') || '').trim();
+            var entry = document.currentScript && document.currentScript.src;
+            var release = entry ? new URL(entry, document.baseURI).searchParams.get('v') : '';
+            return String(params.get('v') || release || '').trim();
         } catch (_) {
             return '';
         }

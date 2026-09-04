@@ -42,13 +42,25 @@ function patchVocabSessionView(source) {
         prepareSessionQueue,
         startReviewFlow,
         startBatch,
-        moveToNextWord,
-        revealMeaning,
+        nextCard,
+        startBatchSpelling,
+        checkBatchSpelling,
+        giveBatchSpellingHint,
+        skipBatchSpelling,
+        finishBatchSession,
+        batchWordQuality,
+        normalizeWord,
+        startSelectedMode,
+        loadSessionCheckpoint,
+        saveSessionCheckpoint,
+        clearSessionCheckpoint,
+        resumeVocabStudyTime,
+        flushVocabStudyTime,
+        updateStudyVisibility,
+        setTimeStart: (time) => { sessionActiveStartTime = time; },
         markCurrentWordFamiliar,
         buildBritishPronunciationUrl,
         playCurrentPronunciation,
-        submitSpelling,
-        applyResult,
         handleCardAction,
         toggleSidePanel,
         saveCurrentNote,
@@ -250,6 +262,7 @@ function createDocumentStub() {
 
     const documentStub = {
         body,
+        visibilityState: 'visible',
         activeElement: null,
         addEventListener(type, handler) {
             if (!listeners.has(type)) {
@@ -294,6 +307,7 @@ function createDocumentStub() {
 
 function createWindowStub(documentStub) {
     const messages = [];
+    const listeners = new Map();
     const URLStub = {
         created: [],
         createObjectURL(blob) {
@@ -329,7 +343,13 @@ function createWindowStub(documentStub) {
         showMessage(text, type) {
             messages.push({ channel: 'message', text, type });
         },
-        addEventListener() {},
+        addEventListener(type, handler) {
+            if (!listeners.has(type)) listeners.set(type, []);
+            listeners.get(type).push(handler);
+        },
+        dispatchEvent(event) {
+            (listeners.get(event.type) || []).forEach(handler => handler(event));
+        },
         removeEventListener() {},
         setTimeout,
         clearTimeout,
@@ -456,7 +476,9 @@ function createSessionElements() {
     const sessionCard = createElementStub('div');
     const answerInput = createElementStub('input');
     sessionCard.__queryMap = {
-        'input[name="answer"]': answerInput
+        'input[name="answer"]': answerInput,
+        '[data-field="batch-spell-input"]': answerInput,
+        '[data-field="batch-spell-feedback"]': createElementStub('div')
     };
 
     const sidePanel = createElementStub('aside');
@@ -567,7 +589,15 @@ function createSessionElements() {
 function createVocabContext() {
     const documentStub = createDocumentStub();
     const windowStub = createWindowStub(documentStub);
+    const memoryStorage = new Map();
+    const storage = {
+        getItem: key => memoryStorage.get(key) ?? null,
+        setItem: (key, value) => memoryStorage.set(key, String(value)),
+        removeItem: key => memoryStorage.delete(key)
+    };
+    windowStub.localStorage = storage;
     const sandbox = {
+        localStorage: storage,
         window: windowStub,
         document: documentStub,
         console,
@@ -649,8 +679,9 @@ async function run() {
             'data-action="menu-import"',
             'data-action="menu-export"',
             'data-action="menu-settings"',
-            'data-vocab-role="due-banner"',
-            'data-action="start-review"',
+            'data-vocab-role="mode-dashboard"',
+            'data-action="start-review-mode"',
+            'data-action="start-learn-mode"',
             'data-vocab-role="session-card"',
             'data-vocab-role="side-panel"',
             'data-action="toggle-side-panel"',
@@ -758,7 +789,7 @@ async function run() {
         const chips = elements.progressStats.__queryListMap['[data-chip]'];
         assert.ok(chips[0].textContent.includes('2'));
         assert.ok(chips[1].textContent.includes('8'));
-        assert.ok(chips[2].textContent.includes('30'));
+        assert.ok(chips[2].textContent.includes('75'));
         assert.strictEqual(elements.progressBar.style.width, '40%');
     });
 
@@ -834,243 +865,145 @@ async function run() {
         assert.strictEqual(hooks.state.session.stage, 'recognition');
         assert.ok(hooks.state.session.currentWord);
         assert.strictEqual(hooks.state.session.dueTotal, 1);
-        assert.strictEqual(hooks.state.session.newTotal, 1);
+        assert.strictEqual(hooks.state.session.newTotal, 0);
     });
 
-    await record('recognition to spelling transition', () => {
-        hooks.resetSessionState();
-        hooks.state.session.stage = 'recognition';
-        hooks.state.session.currentWord = { id: 'w-1', word: 'alpha', meaning: 'A' };
-
-        const event = {
-            preventDefault() {},
-            target: {
-                closest: () => ({ dataset: { action: 'recognize-good' } })
-            }
-        };
-
-        hooks.handleCardAction(event);
-
-        assert.strictEqual(hooks.state.session.stage, 'spelling');
-        assert.strictEqual(hooks.state.session.recognitionQuality, 'good');
-    });
-
-    await record('submit spelling correct answer', async () => {
-        const store = createMockStore([
-            {
-                id: 'w-1',
-                word: 'alpha',
-                meaning: 'A',
-                easeFactor: 2.5,
-                interval: 1,
-                repetitions: 2
-            }
-        ]);
-
+    await record('two-pass recognition interleaves known words before batch spelling', () => {
+        const store = createMockStore([{ id: 'alpha', word: 'alpha' }, { id: 'beta', word: 'beta' }]);
         hooks.setStore(store);
         hooks.resetSessionState();
-        hooks.state.session.stage = 'spelling';
-        hooks.state.session.recognitionQuality = 'easy';
-        hooks.state.session.currentWord = store.words[0];
-        elements.sessionCard.__queryMap['input[name="answer"]'].value = 'alpha';
+        hooks.startReviewFlow({ preferNew: true });
+        const act = action => hooks.handleCardAction({ target: { closest: () => ({ dataset: { action } }) } });
+        act('action-know');
+        assert.strictEqual(hooks.state.session.currentWord.id, 'beta');
+        assert.strictEqual(hooks.state.session.activeQueue[0].passStage, 1);
+        assert.strictEqual(hooks.state.session.completedWords.length, 0);
+        act('action-know');
+        assert.strictEqual(hooks.state.session.currentWordItem.passStage, 1);
+        act('action-p2-know');
+        act('action-p2-know');
+        assert.strictEqual(hooks.state.session.stage, 'batch-spelling');
+        assert.strictEqual(hooks.state.session.spellingWords.length, 2);
+        assert.ok(!store.words[0].lastReviewed);
+    });
 
-        hooks.submitSpelling();
-        await flushPromises();
-
-        assert.strictEqual(hooks.state.session.stage, 'feedback');
-        assert.ok(hooks.state.session.lastAnswer);
-        assert.strictEqual(hooks.state.session.lastAnswer.spellingCorrect, true);
+    await record('batch spelling correct answer persists only once after awaited save', async () => {
+        const store = createMockStore([{ id: 'w-1', word: 'alpha', easeFactor: 2.3, interval: 3, repetitions: 2 }]);
+        const recorded = [];
+        windowStub.StudyStatsManager = { recordWordStudied: w => recorded.push(w), addVocabStudyDuration() {}, render() {} };
+        hooks.setStore(store);
+        hooks.resetSessionState();
+        hooks.state.session.progress.total = 1;
+        hooks.startBatchSpelling(store.words);
+        elements.sessionCard.__queryMap['[data-field="batch-spell-input"]'].value = 'alpha';
+        hooks.checkBatchSpelling();
+        hooks.checkBatchSpelling(); // double Enter must not enqueue a second advancement
+        hooks.skipBatchSpelling();
+        await new Promise(resolve => setTimeout(resolve, 650));
+        assert.strictEqual(hooks.state.session.spellingIndex, 1);
+        assert.strictEqual(hooks.state.session.stage, 'batch-summary');
+        assert.deepStrictEqual(recorded, ['alpha']);
+        assert.strictEqual(store.words[0].repetitions, 3);
         assert.strictEqual(hooks.state.session.progress.completed, 1);
+        await hooks.finishBatchSession();
+        assert.deepStrictEqual(recorded, ['alpha']);
+        windowStub.StudyStatsManager = null;
     });
 
-    await record('submit spelling attempts limit', async () => {
-        const store = createMockStore([
-            {
-                id: 'w-2',
-                word: 'bravo',
-                meaning: 'B',
-                easeFactor: 2.5,
-                interval: 1,
-                repetitions: 1
-            }
-        ]);
-
+    await record('batch misspelling remains wrong even after a later correct answer', async () => {
+        const store = createMockStore([{ id: 'w-2', word: 'bravo', easeFactor: 2.5, interval: 4, repetitions: 2 }]);
         hooks.setStore(store);
         hooks.resetSessionState();
-        hooks.state.session.stage = 'spelling';
-        hooks.state.session.recognitionQuality = 'easy';
-        hooks.state.session.currentWord = store.words[0];
-
-        elements.sessionCard.__queryMap['input[name="answer"]'].value = 'wrong';
-        hooks.submitSpelling();
-        assert.strictEqual(hooks.state.session.spellingAttempts, 1);
-        assert.strictEqual(hooks.state.session.stage, 'spelling');
-
-        elements.sessionCard.__queryMap['input[name="answer"]'].value = 'wrong';
-        hooks.submitSpelling();
-        assert.strictEqual(hooks.state.session.spellingAttempts, 2);
-        assert.strictEqual(hooks.state.session.stage, 'spelling');
-
-        elements.sessionCard.__queryMap['input[name="answer"]'].value = 'wrong';
-        hooks.submitSpelling();
-        await flushPromises();
-
-        assert.strictEqual(hooks.state.session.stage, 'feedback');
-        assert.strictEqual(hooks.state.session.lastAnswer.spellingAttempts, 3);
-        assert.strictEqual(hooks.state.session.lastAnswer.finalQuality, 'wrong');
-        assert.strictEqual(store.words[0].correctCount, 0);
-        assert.strictEqual(store.words[0].repetitions, 0);
-        assert.strictEqual(store.words[0].interval, 1);
-        assert.strictEqual(hooks.state.session.progress.wrong, 1);
-    });
-
-    await record('skip spelling triggers feedback', async () => {
-        const store = createMockStore([
-            {
-                id: 'w-3',
-                word: 'charlie',
-                meaning: 'C',
-                easeFactor: 2.5,
-                interval: 1,
-                repetitions: 1
-            }
-        ]);
-
-        hooks.setStore(store);
-        hooks.resetSessionState();
-        hooks.state.session.stage = 'spelling';
-        hooks.state.session.recognitionQuality = 'good';
-        hooks.state.session.currentWord = store.words[0];
-
-        const event = {
-            preventDefault() {},
-            target: {
-                closest: () => ({ dataset: { action: 'skip-spelling' } })
-            }
-        };
-
-        hooks.handleCardAction(event);
-        await flushPromises();
-
-        assert.strictEqual(hooks.state.session.stage, 'feedback');
-        assert.strictEqual(hooks.state.session.lastAnswer.skipped, true);
-        assert.strictEqual(hooks.state.session.lastAnswer.finalQuality, 'wrong');
+        hooks.startBatchSpelling(store.words);
+        const input = elements.sessionCard.__queryMap['[data-field="batch-spell-input"]'];
+        input.value = 'wrong';
+        hooks.checkBatchSpelling();
+        assert.strictEqual(hooks.state.session.spellingResults['w-2'].wrongAttempts, 1);
+        input.value = 'bravo';
+        hooks.checkBatchSpelling();
+        await new Promise(resolve => setTimeout(resolve, 650));
+        assert.strictEqual(hooks.state.session.stage, 'batch-summary');
         assert.strictEqual(store.words[0].correctCount, 0);
         assert.strictEqual(store.words[0].repetitions, 0);
         assert.strictEqual(hooks.state.session.progress.wrong, 1);
-        hooks.renderCard();
-        assert.ok(elements.sessionCard.innerHTML.includes('vocab-card--wrong'));
-        assert.ok(elements.sessionCard.innerHTML.includes('已跳过，需要加强'));
-        assert.ok(!elements.sessionCard.innerHTML.includes('vocab-card--correct'));
     });
 
-    await record('session card escapes imported word fields', () => {
+    await record('skipping batch spelling schedules wrong and guards duplicate clicks', async () => {
+        const store = createMockStore([{ id: 'w-3', word: 'charlie', easeFactor: 2.5, interval: 4, repetitions: 2 }]);
+        hooks.setStore(store);
         hooks.resetSessionState();
+        hooks.startBatchSpelling(store.words);
+        hooks.skipBatchSpelling();
+        hooks.skipBatchSpelling();
+        await new Promise(resolve => setTimeout(resolve, 1250));
+        assert.strictEqual(hooks.state.session.stage, 'batch-summary');
+        assert.strictEqual(hooks.state.session.spellingIndex, 1);
+        assert.strictEqual(store.words[0].correctCount, 0);
+        assert.strictEqual(store.words[0].repetitions, 0);
+        assert.strictEqual(hooks.state.session.progress.wrong, 1);
+    });
+
+    await record('recognition batch spelling and summary escape imported word fields', () => {
+        const word = { id: 'unsafe', word: '<img src=x onerror="bad()">', meaning: '<svg onload="bad()">', example: '<script>bad()</script>' };
+        hooks.resetSessionState();
+        hooks.state.session.currentWord = word;
         hooks.state.session.stage = 'recognition';
-        hooks.state.session.meaningVisible = true;
-        hooks.state.session.currentWord = {
-            id: 'unsafe-1',
-            word: '<img src=x onerror="window.__wordXss=1">',
-            meaning: '<svg onload="window.__meaningXss=1"></svg>'
-        };
-
+        hooks.state.session.subStage = 'detail-review';
         hooks.renderCard();
-
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;img'));
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;svg'));
+        assert.ok(elements.sessionCard.innerHTML.includes('&lt;script'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<img'));
-        assert.ok(!elements.sessionCard.innerHTML.includes('<svg onload'));
-
-        hooks.state.session.stage = 'spelling';
+        hooks.state.session.spellingWords = [word];
+        hooks.state.session.stage = 'batch-spelling';
         hooks.renderCard();
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;svg'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<svg'));
-
-        hooks.state.session.currentWord = {
-            ...hooks.state.session.currentWord,
-            easeFactor: 2.5,
-            interval: 1,
-            repetitions: 0,
-            nextReview: '2026-08-11T00:00:00.000Z'
-        };
-        hooks.state.session.lastAnswer = {
-            recognitionQuality: 'good',
-            spellingAttempts: 0,
-            spellingCorrect: true,
-            saved: true
-        };
-        hooks.state.session.stage = 'feedback';
+        hooks.state.session.stage = 'batch-summary';
         hooks.renderCard();
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;img'));
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;svg'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<img'));
-        assert.ok(!elements.sessionCard.innerHTML.includes('<svg'));
     });
 
-    await record('recognition renders a labeled phonetic below the word and spelling omits it', () => {
+    await record('recognition renders labeled phonetic and batch spelling omits it', () => {
         hooks.resetSessionState();
-        hooks.state.session.currentWord = {
-            id: 'phonetic-1',
-            word: 'alpha',
-            meaning: '阿尔法',
-            phonetic: ' /ˈæl.fə '
-        };
+        const word = { id: 'phonetic-1', word: 'alpha', meaning: '阿尔法', phonetic: ' /ˈæl.fə ' };
+        hooks.state.session.currentWord = word;
         hooks.state.session.stage = 'recognition';
-
         hooks.renderCard();
-
-        const recognitionMarkup = elements.sessionCard.innerHTML;
-        assert.match(
-            recognitionMarkup,
-            /<div class="vocab-card__word">alpha<\/div>\s*<div class="vocab-card__phonetic">/,
-            'Expected the phonetic block immediately below the word'
-        );
-        assert.ok(recognitionMarkup.includes('<span class="visually-hidden">音标：</span>'));
-        assert.ok(recognitionMarkup.includes('<span>ˈæl.fə</span>'));
-        assert.strictEqual((recognitionMarkup.match(/aria-hidden="true">\/<\/span>/g) || []).length, 2);
-        const wordlineRule = readSource('css/main.css').match(/\.vocab-card__wordline\s*\{([^}]*)\}/);
-        assert.ok(wordlineRule, 'Missing word-and-phonetic layout rule');
-        assert.match(wordlineRule[1], /flex-direction:\s*column/);
-
-        hooks.state.session.stage = 'spelling';
+        assert.ok(elements.sessionCard.innerHTML.includes('class="vocab-card__phonetic"'));
+        assert.ok(elements.sessionCard.innerHTML.includes('<span class="visually-hidden">音标：</span>'));
+        assert.ok(elements.sessionCard.innerHTML.includes('<span>ˈæl.fə</span>'));
+        hooks.state.session.stage = 'batch-spelling';
+        hooks.state.session.spellingWords = [word];
         hooks.renderCard();
-
-        const spellingMarkup = elements.sessionCard.innerHTML;
-        assert.ok(!spellingMarkup.includes('vocab-card__phonetic'));
-        assert.ok(!spellingMarkup.includes('vocab-feedback__phonetic'));
-        assert.ok(!spellingMarkup.includes('音标'));
-        assert.ok(!spellingMarkup.includes('ˈæl.fə'));
+        assert.ok(!elements.sessionCard.innerHTML.includes('ˈæl.fə'));
+        assert.ok(!elements.sessionCard.innerHTML.includes('音标'));
     });
 
-    await record('recognition reveal shows an escaped example and clear memory labels', () => {
+    await record('two-pass reveal preserves escaped example and pronunciation fallback', () => {
         hooks.resetSessionState();
-        hooks.state.session.currentWord = {
-            id: 'example-1',
-            word: 'emperor',
-            meaning: '皇帝',
-            example: 'The <emperor> ruled wisely.'
-        };
+        hooks.state.session.currentWord = { id: 'example-1', word: 'emperor', meaning: '皇帝', example: 'The <emperor> ruled wisely.' };
         hooks.state.session.stage = 'recognition';
-        hooks.state.session.meaningVisible = true;
-
+        hooks.state.session.subStage = 'detail-review';
         hooks.renderCard();
-
         const markup = elements.sessionCard.innerHTML;
-        assert.ok(markup.includes('vocab-card__example'));
-        assert.ok(markup.includes('The &lt;emperor&gt; ruled wisely.'));
+        assert.ok(markup.includes('&lt;'));
+        assert.ok(markup.includes('ruled wisely.'));
         assert.ok(!markup.includes('<emperor>'));
-        assert.ok(markup.includes('认识'));
-        assert.ok(markup.includes('有点模糊'));
-        assert.ok(markup.includes('不认识'));
         assert.ok(markup.includes('data-action="mark-familiar"'));
-        assert.ok(markup.includes('标为熟词'));
-        assert.ok(markup.includes('data-action="play-pronunciation"'));
+        assert.ok(markup.includes('data-action="play-pronounce"'));
         assert.ok(markup.includes('真人英音'));
-        assert.ok(markup.includes('去 Cambridge 听'));
         assert.ok(markup.includes('data-pronunciation-fallback hidden'));
         assert.ok(markup.includes('https://dictionary.cambridge.org/search/english/direct/?q=emperor'));
         assert.ok(markup.includes('target="_blank"'));
         assert.ok(markup.includes('rel="noopener noreferrer"'));
+        hooks.state.session.subStage = 'testing';
+        hooks.renderCard();
+        assert.ok(elements.sessionCard.innerHTML.includes('data-action="action-know"'));
+        assert.ok(elements.sessionCard.innerHTML.includes('data-action="action-hint"'));
+        assert.ok(elements.sessionCard.innerHTML.includes('data-action="action-unknown"'));
     });
 
     await record('pronunciation plays British human audio in place', async () => {
@@ -1153,129 +1086,53 @@ async function run() {
         assert.strictEqual(store.words[0].correctCount, 4);
         assert.strictEqual(store.getNewWords(10).length, 0);
         assert.strictEqual(hooks.state.session.activeQueue.length, 0);
-        assert.strictEqual(hooks.state.session.stage, 'complete');
+        assert.strictEqual(hooks.state.session.spellingWords.length, 0);
+        await flushPromises();
+        assert.strictEqual(hooks.state.session.stage, 'batch-summary');
     });
 
-    await record('feedback renders phonetic as a labeled detail', () => {
+    await record('batch summary preserves phonetic without exposing internal scheduler fields', () => {
         hooks.resetSessionState();
-        hooks.state.session.currentWord = {
-            id: 'phonetic-2',
-            word: 'beta',
-            meaning: '贝塔',
-            phonetic: 'ˈbiː.tə/',
-            easeFactor: 2.5,
-            interval: 1,
-            repetitions: 1,
-            lastReviewed: '2026-08-19T00:00:00.000Z'
-        };
-        hooks.state.session.lastAnswer = {
-            recognitionQuality: 'good',
-            spellingAttempts: 0,
-            spellingCorrect: true,
-            finalQuality: 'good',
-            finalEF: 2.5,
-            saved: true
-        };
-        hooks.state.session.stage = 'feedback';
-
+        hooks.state.session.spellingWords = [{ id: 'beta', word: 'beta', meaning: '贝塔', phonetic: 'ˈbiː.tə', easeFactor: 2.5 }];
+        hooks.state.session.stage = 'batch-summary';
         hooks.renderCard();
-
-        const markup = elements.sessionCard.innerHTML;
-        assert.match(
-            markup,
-            /<div><dt>音标<\/dt><dd class="vocab-feedback__phonetic">[\s\S]*?<span>ˈbiː\.tə<\/span>[\s\S]*?<\/dd><\/div>/
-        );
-        assert.ok(!markup.includes('难度因子'));
-        assert.ok(!markup.includes('当前 EF'));
+        assert.ok(elements.sessionCard.innerHTML.includes('ˈbiː.tə'));
+        assert.ok(!elements.sessionCard.innerHTML.includes('easeFactor'));
     });
 
-    await record('missing blank and slash-only phonetics omit recognition blocks and feedback rows', () => {
-        const omittedPhonetics = [undefined, '   ', ' /   / ', '/', '///'];
-
-        omittedPhonetics.forEach((phonetic, index) => {
+    await record('empty phonetics omit recognition pronunciation details', () => {
+        [undefined, '   ', ' /   / ', '/', '///'].forEach(phonetic => {
             hooks.resetSessionState();
-            hooks.state.session.currentWord = {
-                id: `phonetic-empty-${index}`,
-                word: 'gamma',
-                meaning: '伽马',
-                phonetic,
-                easeFactor: 2.5,
-                interval: 1,
-                repetitions: 1,
-                lastReviewed: '2026-08-19T00:00:00.000Z'
-            };
+            hooks.state.session.currentWord = { id: 'gamma', word: 'gamma', phonetic };
             hooks.state.session.stage = 'recognition';
             hooks.renderCard();
-
-            assert.ok(!elements.sessionCard.innerHTML.includes('vocab-card__phonetic'));
-
-            hooks.state.session.lastAnswer = {
-                recognitionQuality: 'good',
-                spellingAttempts: 0,
-                spellingCorrect: true,
-                finalQuality: 'good',
-                finalEF: 2.5,
-                saved: true
-            };
-            hooks.state.session.stage = 'feedback';
-            hooks.renderCard();
-
-            assert.ok(!elements.sessionCard.innerHTML.includes('vocab-feedback__phonetic'));
-            assert.ok(!elements.sessionCard.innerHTML.includes('<dt>音标</dt>'));
+            assert.ok(!elements.sessionCard.innerHTML.includes('class="vocab-card__phonetic"'));
         });
     });
 
-    await record('recognition and feedback escape malicious phonetics', () => {
-        const maliciousPhonetic = '/<img src=x onerror="window.__phoneticXss=1">/';
+    await record('recognition and batch summary escape malicious phonetics', () => {
+        const word = { id: 'unsafe-ph', word: 'delta', phonetic: '/<img src=x onerror="bad()">/' };
         hooks.resetSessionState();
-        hooks.state.session.currentWord = {
-            id: 'phonetic-unsafe',
-            word: 'delta',
-            meaning: '德尔塔',
-            phonetic: maliciousPhonetic,
-            easeFactor: 2.5,
-            interval: 1,
-            repetitions: 1,
-            lastReviewed: '2026-08-19T00:00:00.000Z'
-        };
+        hooks.state.session.currentWord = word;
         hooks.state.session.stage = 'recognition';
-
         hooks.renderCard();
-
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;img'));
-        assert.ok(elements.sessionCard.innerHTML.includes('&quot;window.__phoneticXss=1&quot;'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<img'));
-
-        hooks.state.session.lastAnswer = {
-            recognitionQuality: 'good',
-            spellingAttempts: 0,
-            spellingCorrect: true,
-            finalQuality: 'good',
-            finalEF: 2.5,
-            saved: true
-        };
-        hooks.state.session.stage = 'feedback';
+        hooks.state.session.spellingWords = [word];
+        hooks.state.session.stage = 'batch-summary';
         hooks.renderCard();
-
         assert.ok(elements.sessionCard.innerHTML.includes('&lt;img'));
-        assert.ok(elements.sessionCard.innerHTML.includes('&quot;window.__phoneticXss=1&quot;'));
         assert.ok(!elements.sessionCard.innerHTML.includes('<img'));
     });
 
-    await record('move to next word handles completion', () => {
+    await record('next card enters batch spelling after final recognition', () => {
         hooks.resetSessionState();
+        const word = { id: 'delta', word: 'delta' };
+        hooks.state.session.completedWords = [word];
         hooks.state.session.activeQueue = [];
-        hooks.state.session.backlog = [];
-
-        hooks.moveToNextWord();
-        assert.strictEqual(hooks.state.session.stage, 'complete');
-
-        hooks.resetSessionState();
-        hooks.state.session.activeQueue = [];
-        hooks.state.session.backlog = [{ id: 'w-4', word: 'delta', meaning: 'D' }];
-
-        hooks.moveToNextWord();
-        assert.strictEqual(hooks.state.session.stage, 'batch-finished');
+        hooks.nextCard();
+        assert.strictEqual(hooks.state.session.stage, 'batch-spelling');
+        assert.strictEqual(hooks.state.session.spellingWords[0].id, 'delta');
     });
 
     await record('side panel toggle updates state', () => {
@@ -1780,75 +1637,221 @@ async function run() {
         assert.strictEqual(anchor._clicked, true);
     });
 
-    await record('keyboard Enter triggers feedback action', () => {
+    await record('keyboard shortcuts map first and second pass actions', () => {
         hooks.resetSessionState();
-        hooks.state.session.stage = 'feedback';
+        hooks.setStore(createMockStore([{ id: 'keyboard', word: 'keyboard' }]));
+        hooks.startReviewFlow({ preferNew: true });
         documentStub.activeElement = null;
-
-        const nextButton = createElementStub('button');
-        nextButton.dataset.action = 'next-word';
-        elements.sessionCard.__queryMap['[data-action="next-word"]'] = nextButton;
-
         let prevented = false;
-        documentStub.dispatchEvent({
-            type: 'keydown',
-            code: 'Enter',
-            preventDefault() {
-                prevented = true;
-            }
-        });
-
-        assert.strictEqual(nextButton._clicked, true);
+        documentStub.dispatchEvent({ type: 'keydown', code: 'Digit1', preventDefault() { prevented = true; } });
         assert.strictEqual(prevented, true);
+        assert.strictEqual(hooks.state.session.currentWordItem.passStage, 1);
+        documentStub.dispatchEvent({ type: 'keydown', code: 'KeyJ', preventDefault() {} });
+        assert.strictEqual(hooks.state.session.stage, 'batch-spelling');
     });
 
-    await record('keyboard Enter triggers batch summary primary action', () => {
+    await record('keyboard is ignored when vocab is inactive or tool modal is open', () => {
         hooks.resetSessionState();
-        hooks.state.session.stage = 'batch-finished';
-        documentStub.activeElement = null;
-
-        const nextBatch = createElementStub('button');
-        nextBatch.dataset.action = 'next-batch';
-        const endSession = createElementStub('button');
-        endSession.dataset.action = 'end-session';
-
-        elements.sessionCard.__queryMap['[data-action="next-batch"]'] = nextBatch;
-        elements.sessionCard.__queryMap['[data-action="end-session"]'] = endSession;
-
-        let prevented = false;
-        documentStub.dispatchEvent({
-            type: 'keydown',
-            code: 'Enter',
-            preventDefault() {
-                prevented = true;
-            }
-        });
-
-        assert.strictEqual(nextBatch._clicked, true);
-        assert.ok(!endSession._clicked);
-        assert.strictEqual(prevented, true);
+        hooks.setStore(createMockStore([{ id: 'inactive', word: 'inactive' }]));
+        hooks.startReviewFlow({ preferNew: true });
+        const container = hooks.state.container;
+        container.hidden = true;
+        documentStub.dispatchEvent({ type: 'keydown', code: 'Digit1', preventDefault() { throw new Error('inactive key captured'); } });
+        assert.strictEqual(hooks.state.session.currentWordItem.passStage, 0);
+        container.hidden = false;
+        const selector = '.vocab-tool-modal, .vocab-dict-drawer, .vocab-wordlist-shell, .account-modal-overlay.active';
+        documentStub.registerSelector(selector, createElementStub('div'));
+        documentStub.dispatchEvent({ type: 'keydown', code: 'Digit1', preventDefault() { throw new Error('modal key captured'); } });
+        assert.strictEqual(hooks.state.session.currentWordItem.passStage, 0);
+        documentStub.registerSelector(selector, null);
     });
 
-    await record('keyboard Enter triggers completion action', () => {
+    await record('keyboard ignores editable fields and repeated keydown', () => {
         hooks.resetSessionState();
-        hooks.state.session.stage = 'complete';
+        hooks.setStore(createMockStore([{ id: 'editable', word: 'editable' }]));
+        hooks.startReviewFlow({ preferNew: true });
+        documentStub.activeElement = elements.noteInput;
+        documentStub.dispatchEvent({ type: 'keydown', code: 'KeyJ', preventDefault() { throw new Error('typing captured'); } });
         documentStub.activeElement = null;
+        documentStub.dispatchEvent({ type: 'keydown', code: 'Digit1', repeat: true, preventDefault() { throw new Error('repeat captured'); } });
+        assert.strictEqual(hooks.state.session.currentWordItem.passStage, 0);
+    });
 
-        const endSession = createElementStub('button');
-        endSession.dataset.action = 'end-session';
-        elements.sessionCard.__queryMap['[data-action="end-session"]'] = endSession;
 
-        let prevented = false;
-        documentStub.dispatchEvent({
-            type: 'keydown',
-            code: 'Enter',
-            preventDefault() {
-                prevented = true;
-            }
-        });
+    await record('review has no new words at partial or full capacity and dailyNew zero is respected', () => {
+        const due = { id: 'due-quota', word: 'due', lastReviewed: new Date(0).toISOString(), nextReview: new Date(0).toISOString() };
+        const fresh = { id: 'new-quota', word: 'new' };
+        const store = createMockStore([due, fresh], { dailyNew: 0, reviewLimit: 100 });
+        hooks.setStore(store);
+        hooks.resetSessionState();
+        hooks.prepareSessionQueue();
+        assert.deepStrictEqual(Array.from(hooks.state.session.backlog, w => w.id), ['due-quota']);
+        store.config.reviewLimit = 1;
+        hooks.prepareSessionQueue();
+        assert.deepStrictEqual(Array.from(hooks.state.session.backlog, w => w.id), ['due-quota']);
+        hooks.prepareSessionQueue({ preferNew: true });
+        assert.strictEqual(hooks.state.session.backlog.length, 0);
+        store.config.dailyNew = 1;
+        hooks.prepareSessionQueue({ preferNew: true });
+        assert.deepStrictEqual(Array.from(hooks.state.session.backlog, w => w.id), ['new-quota']);
+    });
 
-        assert.strictEqual(endSession._clicked, true);
-        assert.strictEqual(prevented, true);
+    await record('hint-only spelling is hard not good and survives checkpoint roundtrip', () => {
+        hooks.resetSessionState();
+        const store = createMockStore([{ id: 'hint', word: 'hint' }], { activeListId: 'list-hint' });
+        hooks.setStore(store);
+        hooks.startBatchSpelling(store.words);
+        hooks.giveBatchSpellingHint();
+        assert.strictEqual(hooks.batchWordQuality(store.words[0]), 'hard');
+        assert.strictEqual(hooks.state.session.spellingInput, 'h');
+        const checkpoint = hooks.loadSessionCheckpoint();
+        assert.strictEqual(checkpoint.spellingResults.hint.hintUsed, true);
+        assert.strictEqual(checkpoint.listId, 'list-hint');
+        hooks.clearSessionCheckpoint();
+        assert.strictEqual(hooks.loadSessionCheckpoint(), null);
+        assert.strictEqual(JSON.parse(windowStub.localStorage.getItem('ielts_vocab_session_checkpoint')).cleared, true);
+    });
+
+    await record('partial batch save failure keeps checkpoint and retry does not reschedule saved words', async () => {
+        hooks.resetSessionState();
+        const store = createMockStore([{ id: 'save-a', word: 'alpha' }, { id: 'save-b', word: 'beta' }]);
+        hooks.setStore(store);
+        hooks.startBatchSpelling(store.words);
+        hooks.state.session.spellingResults = {
+            'save-a': { answered: true }, 'save-b': { answered: true, hintUsed: true }
+        };
+        const update = store.updateWord.bind(store);
+        const calls = [];
+        let rejectSecond = true;
+        store.updateWord = async (id, patch) => {
+            calls.push(id);
+            if (id === 'save-b' && rejectSecond) throw new Error('disk quota');
+            return update(id, patch);
+        };
+        const counted = [];
+        windowStub.StudyStatsManager = { recordWordStudied: w => counted.push(w), addVocabStudyDuration() {}, render() {} };
+        assert.strictEqual(await hooks.finishBatchSession(), false);
+        assert.strictEqual(hooks.state.session.stage, 'batch-save-error');
+        assert.strictEqual(hooks.loadSessionCheckpoint().savedWordIds[0], 'save-a');
+        assert.deepStrictEqual(counted, []);
+        rejectSecond = false;
+        assert.strictEqual(await hooks.finishBatchSession(), true);
+        assert.deepStrictEqual(calls, ['save-a', 'save-b', 'save-b']);
+        assert.deepStrictEqual(counted, ['alpha', 'beta']);
+        assert.strictEqual(hooks.loadSessionCheckpoint(), null);
+        windowStub.StudyStatsManager = null;
+    });
+
+    await record('batch cannot finalize unanswered words or clear progress while writes are pending', async () => {
+        hooks.resetSessionState();
+        const store = createMockStore([{ id: 'pending', word: 'pending' }]);
+        hooks.setStore(store);
+        hooks.startBatchSpelling(store.words);
+        assert.strictEqual(await hooks.finishBatchSession(), false);
+        assert.strictEqual(hooks.state.session.stage, 'batch-spelling');
+        hooks.state.session.spellingResults.pending = { answered: true };
+        const update = store.updateWord.bind(store);
+        let release;
+        store.updateWord = (id, patch) => new Promise(resolve => { release = async () => resolve(await update(id, patch)); });
+        const first = hooks.finishBatchSession();
+        assert.strictEqual(hooks.state.session.stage, 'batch-saving');
+        assert.ok(hooks.loadSessionCheckpoint());
+        assert.strictEqual(await hooks.finishBatchSession(), false);
+        await release();
+        assert.strictEqual(await first, true);
+    });
+
+    await record('normalization retains scheduler history notes and source metadata', () => {
+        const original = { id: 'history', word: 'history', easeFactor: 2.2, repetitions: 7, interval: 90,
+            note: 'custom note', source: 'custom list', familiarAt: '2026-01-01T00:00:00.000Z' };
+        const normalized = hooks.normalizeWord(original);
+        for (const key of ['easeFactor', 'repetitions', 'interval', 'note', 'source', 'familiarAt']) {
+            assert.strictEqual(normalized[key], original[key]);
+        }
+    });
+
+    await record('timer stops in background another view and mode dashboard and resumes visible study', () => {
+        hooks.resetSessionState();
+        hooks.state.session.stage = 'recognition';
+        hooks.state.ui.sessionVisible = true;
+        hooks.state.container.hidden = false;
+        documentStub.visibilityState = 'visible';
+        let seconds = 0;
+        windowStub.StudyStatsManager = { addVocabStudyDuration: n => { seconds += n; }, render() {} };
+        hooks.setTimeStart(Date.now() - 5000);
+        documentStub.visibilityState = 'hidden';
+        hooks.updateStudyVisibility();
+        assert.ok(seconds >= 5 && seconds <= 6);
+        const afterHide = seconds;
+        hooks.flushVocabStudyTime();
+        assert.strictEqual(seconds, afterHide);
+        documentStub.visibilityState = 'visible';
+        hooks.updateStudyVisibility();
+        hooks.setTimeStart(Date.now() - 3000);
+        hooks.state.container.hidden = true;
+        hooks.updateStudyVisibility();
+        assert.ok(seconds >= afterHide + 3 && seconds <= afterHide + 4);
+        const afterNavigate = seconds;
+        hooks.flushVocabStudyTime();
+        assert.strictEqual(seconds, afterNavigate);
+        hooks.state.container.hidden = false;
+        hooks.state.ui.sessionVisible = false;
+        hooks.updateStudyVisibility();
+        hooks.flushVocabStudyTime();
+        assert.strictEqual(seconds, afterNavigate);
+        windowStub.StudyStatsManager = null;
+    });
+
+    await record('pronunciation streams cancel the previous player without silent synthetic fallback', async () => {
+        const instances = [];
+        class SingleAudio {
+            constructor(src) { this.src = src; instances.push(this); }
+            play() { return Promise.resolve(); }
+            pause() { this.paused = true; }
+            addEventListener() {}
+        }
+        windowStub.Audio = SingleAudio;
+        await hooks.playCurrentPronunciation(null, { word: 'first' });
+        await hooks.playCurrentPronunciation(null, { word: 'second' });
+        assert.strictEqual(instances[0].paused, true);
+        assert.ok(instances[1].src.includes('second'));
+        const source = readSource('js/components/vocabSessionView.js');
+        const player = source.slice(source.indexOf('    function playWordPronunciation('), source.indexOf('    function formatWordDate('));
+        assert.ok(!player.includes('speechSynthesis.speak'));
+    });
+
+    await record('checkpoint from a different word list is not resumed', () => {
+        hooks.resetSessionState();
+        hooks.setStore(createMockStore([{ id: 'current', word: 'current' }], { activeListId: 'current-list' }));
+        windowStub.localStorage.setItem('ielts_vocab_session_checkpoint', JSON.stringify({
+            timestamp: Date.now(), mode: 'learn', listId: 'different-list', stage: 'recognition',
+            currentWord: { id: 'foreign', word: 'foreign' }, activeQueue: []
+        }));
+        hooks.startSelectedMode('learn');
+        assert.strictEqual(hooks.state.session.currentWord.id, 'current');
+        assert.strictEqual(hooks.loadSessionCheckpoint().listId, 'current-list');
+    });
+
+
+    await record('unchanged checkpoint keeps its timestamp and remote updates invalidate stale queues', () => {
+        hooks.resetSessionState();
+        hooks.setStore(createMockStore([{ id: 'local-only', word: 'local' }]));
+        hooks.startReviewFlow({ preferNew: true });
+        const key = 'ielts_vocab_session_checkpoint';
+        const saved = JSON.parse(windowStub.localStorage.getItem(key));
+        saved.timestamp = 42;
+        windowStub.localStorage.setItem(key, JSON.stringify(saved));
+        hooks.flushVocabStudyTime();
+        assert.strictEqual(JSON.parse(windowStub.localStorage.getItem(key)).timestamp, 42);
+        const remote = { timestamp: 99, mode: 'learn', listId: 'default', stage: 'recognition',
+            currentWord: { id: 'remote-word', word: 'remote' }, activeQueue: [] };
+        windowStub.localStorage.setItem(key, JSON.stringify(remote));
+        windowStub.dispatchEvent({ type: 'ielts:vocab-checkpoint-updated' });
+        assert.strictEqual(hooks.state.ui.sessionVisible, false);
+        assert.strictEqual(hooks.state.session.currentWord, null);
+        hooks.flushVocabStudyTime();
+        assert.strictEqual(JSON.parse(windowStub.localStorage.getItem(key)).timestamp, 99);
+        assert.strictEqual(hooks.loadSessionCheckpoint().currentWord.id, 'remote-word');
     });
 
     await record('list switcher attaches handler', () => {

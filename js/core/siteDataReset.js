@@ -208,9 +208,13 @@
             });
         }
 
-        try { errors.push(...clearWebStorage()); }
-        catch (error) {
-            errors.push({ stage: 'clear-web-storage', error });
+        // Keep local ownership and recovery keys when any database may still contain
+        // the previous user's records. Otherwise a second account could adopt them.
+        if (!errors.length) {
+            try { errors.push(...clearWebStorage()); }
+            catch (error) {
+                errors.push({ stage: 'clear-web-storage', error });
+            }
         }
 
         if (errors.length) {

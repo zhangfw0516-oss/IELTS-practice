@@ -19,6 +19,7 @@ import subprocess
 import sys
 import io
 from typing import Dict, List, Optional
+from browser_launch import chromium_launch_options
 
 # 强制设置控制台输出为 UTF-8，解决 Windows 环境下的编码问题
 if sys.stdout.encoding.lower() != 'utf-8':
@@ -589,10 +590,11 @@ async def _launch_chromium(p) -> Browser:
         return await p.chromium.launch(
             headless=True,
             args=["--allow-file-access-from-files"],
+            **chromium_launch_options(),
         )
     except Exception as e:
         log_step(f"Chromium 启动失败，回退默认参数: {e}", "WARNING")
-        return await p.chromium.launch(headless=True)
+        return await p.chromium.launch(headless=True, **chromium_launch_options())
 
 
 def _collect_console(page: Page, store: List[ConsoleEntry]) -> None:
